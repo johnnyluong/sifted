@@ -1,0 +1,13 @@
+.env
+data/
+*.cookies
+cookies.txt
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.claude/baseline/
+.claude/settings.local.json
+.DS_Store
+web/node_modules/
+web/dist/

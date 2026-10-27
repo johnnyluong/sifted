@@ -1,0 +1,335 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/funnel-display";
+@import "@fontsource-variable/funnel-sans";
+@import "@fontsource/fragment-mono";
+
+:root {
+  --pan: #f3f4f6;
+  --sheet: #ffffff;
+  --mesh: #e0e3e8;
+  --graphite: #15171c;
+  --brass: #9a6b12;
+  --alarm: #c23a2e;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pan: #0c0d10;
+    --sheet: #15171b;
+    --mesh: #272a31;
+    --graphite: #eceef2;
+    --brass: #d9a54a;
+    --alarm: #f0695c;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --pan: #0c0d10;
+  --sheet: #15171b;
+  --mesh: #272a31;
+  --graphite: #eceef2;
+  --brass: #d9a54a;
+  --alarm: #f0695c;
+  color-scheme: dark;
+}
+
+:root {
+  --silt: color-mix(in srgb, var(--graphite) 62%, var(--sheet));
+  --dust: color-mix(in srgb, var(--graphite) 50%, var(--sheet));
+  --ink-soft: color-mix(in srgb, var(--graphite) 82%, var(--sheet));
+  --hover: color-mix(in srgb, var(--graphite) 4%, var(--sheet));
+  --pan-hover: color-mix(in srgb, var(--graphite) 7%, var(--pan));
+  --brass-wash: color-mix(in srgb, var(--brass) 12%, var(--sheet));
+  --alarm-wash: color-mix(in srgb, var(--alarm) 10%, var(--sheet));
+}
+
+@theme inline {
+  --color-pan: var(--pan);
+  --color-sheet: var(--sheet);
+  --color-mesh: var(--mesh);
+  --color-graphite: var(--graphite);
+  --color-silt: var(--silt);
+  --color-dust: var(--dust);
+  --color-ink-soft: var(--ink-soft);
+  --color-brass: var(--brass);
+  --color-brass-wash: var(--brass-wash);
+  --color-alarm: var(--alarm);
+  --color-alarm-wash: var(--alarm-wash);
+  --color-hover: var(--hover);
+  --color-pan-hover: var(--pan-hover);
+
+  --font-display: "Funnel Display Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Funnel Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Fragment Mono", ui-monospace, "SF Mono", monospace;
+
+  --text-micro: 11px;
+  --text-micro--line-height: 14px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-body: 14px;
+  --text-body--line-height: 20px;
+  --text-reading: 15px;
+  --text-reading--line-height: 24px;
+  --text-heading: 28px;
+  --text-heading--line-height: 34px;
+  --text-heading--letter-spacing: -0.015em;
+  --text-page: 32px;
+  --text-page--line-height: 36px;
+  --text-page--letter-spacing: -0.02em;
+  --text-score: 64px;
+  --text-score--line-height: 1;
+  --text-score--letter-spacing: -0.04em;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+
+  --shadow-float: 0 12px 32px -12px rgb(12 13 16 / 0.28), 0 0 0 1px color-mix(in srgb, var(--graphite) 8%, transparent);
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--pan);
+  color: var(--graphite);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+}
+
+/* In the base layer, so a utility such as focus-visible:outline-none can override it. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--graphite);
+    outline-offset: 2px;
+  }
+}
+
+@utility surface {
+  border: 1px solid var(--mesh);
+  border-radius: var(--radius-lg);
+  background: var(--sheet);
+}
+
+@utility surface-pad {
+  padding: 16px;
+  @media (width >= 700px) {
+    padding: 20px;
+  }
+}
+
+@utility hit-area-44 {
+  &::after {
+    content: "";
+    position: absolute;
+    inset: min(0px, calc(50% - 22px));
+  }
+}
+
+::selection {
+  background: var(--brass-wash);
+}
+
+.item-list {
+  position: relative;
+  --rail-w: 120px;
+  --rail-end: 20px;
+}
+
+@media (width < 700px) {
+  .item-list {
+    --rail-w: 72px;
+    --rail-end: 16px;
+  }
+}
+
+.rail {
+  position: relative;
+  width: var(--rail-w);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--mesh);
+}
+
+.rail-mark {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 999px;
+  background: var(--brass);
+}
+
+.rail-mark[data-tone="done"] {
+  box-shadow: inset 0 0 0 1.5px var(--brass);
+  background: var(--sheet);
+}
+
+.rail-mark[data-tone="archived"] {
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  background: var(--dust);
+}
+
+.instrument .rail-mark {
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+}
+
+.strip-dot {
+  position: absolute;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 999px;
+  background: var(--dust);
+}
+
+.strip-dot[data-above] {
+  background: var(--brass);
+}
+
+.rail-tether {
+  position: absolute;
+  top: 50%;
+  height: 0;
+  border-top: 1.5px dashed var(--dust);
+  margin-top: -0.75px;
+}
+
+.rail-tether[data-toward="keep"] {
+  border-color: var(--brass);
+}
+
+.rail-tether::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  border: 3.25px solid transparent;
+}
+
+.rail-tether[data-toward="keep"]::after {
+  right: -5px;
+  border-left: 4px solid var(--brass);
+}
+
+.rail-tether[data-toward="archive"]::after {
+  left: -5px;
+  border-right: 4px solid var(--dust);
+}
+
+/* 1.5px at 1x: a 1px line at a fractional x antialiases to a pale gray. */
+.threshold-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(var(--rail-end) + var(--rail-w) * (100 - var(--threshold)) / 100);
+  width: 1.5px;
+  margin-right: -0.75px;
+  background: var(--brass);
+  transform-origin: top;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@media (min-resolution: 2dppx) {
+  .threshold-line {
+    width: 1px;
+    margin-right: -0.5px;
+  }
+}
+
+.threshold-label {
+  position: absolute;
+  top: -20px;
+  left: 0;
+  transform: translateX(-50%);
+  font: 400 var(--text-micro) / var(--text-micro--line-height) var(--font-mono);
+  color: var(--brass);
+}
+
+.shelf[data-drop="true"] {
+  background: var(--sheet);
+  box-shadow: inset 0 0 0 1.5px var(--graphite);
+}
+
+.stage-track {
+  --stage-gap: 72px;
+  display: flex;
+  align-items: center;
+  width: calc(3 * var(--stage-gap));
+}
+
+.stage-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--mesh);
+}
+
+.stage-dot[data-state="done"],
+.stage-dot[data-state="active"] {
+  background: var(--graphite);
+}
+
+.stage-dot[data-state="queued"] {
+  background: var(--sheet);
+  box-shadow: inset 0 0 0 1.5px var(--graphite);
+}
+
+.stage-dot[data-state="active"] {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--graphite) 12%, transparent);
+  animation: stage-pulse 1.6s ease-in-out infinite;
+}
+
+.stage-dot[data-state="waiting"] {
+  background: var(--sheet);
+  box-shadow: inset 0 0 0 1.5px var(--silt);
+}
+
+.stage-dot[data-state="failed"] {
+  background: var(--alarm);
+}
+
+.stage-link {
+  flex: 1;
+  height: 1px;
+  background: var(--mesh);
+}
+
+.stage-link[data-done="true"] {
+  background: var(--graphite);
+}
+
+@keyframes stage-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (width < 700px) {
+  .stage-track {
+    --stage-gap: 32px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-dot[data-state="active"] {
+    animation: none;
+  }
+}

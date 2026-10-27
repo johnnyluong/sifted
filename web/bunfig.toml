@@ -1,0 +1,3 @@
+[install]
+# Resolve only versions published at least 7 days ago; poisoned npm releases are usually pulled sooner.
+minimumReleaseAge = 604800

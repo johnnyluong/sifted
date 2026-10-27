@@ -1,0 +1,79 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": ["**", "!dist", "!src/api/schema.gen.ts"]
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "linter": {
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "openapi-fetch": "Call the API through the queries and hooks in @/api.",
+              "@dnd-kit/react": "@dnd-kit/react is pre-1.0; keep it inside src/components/shelf.tsx."
+            },
+            "patterns": [
+              {
+                "group": ["**/api/client", "**/api/schema.gen"],
+                "message": "Import from @/api; the client and the generated schema are private to src/api."
+              }
+            ]
+          }
+        },
+        "noRestrictedGlobals": {
+          "level": "error",
+          "options": {
+            "deniedGlobals": {
+              "fetch": "Call the API through the queries and hooks in @/api."
+            }
+          }
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["src/components/shelf.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/api/client", "**/api/schema.gen"],
+                    "message": "Import from @/api; the client and the generated schema are private to src/api."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/api/**", "scripts/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off",
+            "noRestrictedGlobals": "off"
+          }
+        }
+      }
+    }
+  ]
+}

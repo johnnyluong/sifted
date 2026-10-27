@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Sift</title>
+  <style>.g{stroke:#15171c}@media (prefers-color-scheme:dark){.g{stroke:#eceef2}}</style>
+  <g fill="none" stroke-linecap="round" stroke-width="3.5">
+    <path class="g" d="M5 8h22M9 16h14"/>
+    <path d="M13 24h6" stroke="#c8952f"/>
+  </g>
+</svg>

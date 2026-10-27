@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(agent-browser:*)",
+      "Bash(.claude/scripts/check.sh:*)",
+      "Bash(.claude/scripts/changes.sh:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run pyright:*)"
+    ],
+    "deny": [
+      "Read(./.env)"
+    ]
+  }
+}
