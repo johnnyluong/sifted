@@ -37,6 +37,10 @@ class Prompt(StrEnum):
     brief_user = "brief_user"
     topics_system = "topics_system"
     topics_user = "topics_user"
+    rebuild_system = "rebuild_system"
+    rebuild_user = "rebuild_user"
+    fit_system = "fit_system"
+    fit_user = "fit_user"
     setup_system = "setup_system"
     setup_user = "setup_user"
 

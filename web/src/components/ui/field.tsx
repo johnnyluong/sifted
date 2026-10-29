@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import { type ComponentProps, type JSX, useLayoutEffect, useRef } from "react";
+import { type ComponentProps, type JSX, type ReactNode, useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 const field =
@@ -82,4 +82,24 @@ export function Select({ className, ...props }: ComponentProps<"select">): JSX.E
 export function Label({ className, ...props }: ComponentProps<"label">): JSX.Element {
   // biome-ignore lint/a11y/noLabelWithoutControl: callers pass htmlFor or nest the control.
   return <label className={cn("mb-1.5 block font-[520] text-[13px] text-ink-soft", className)} {...props} />;
+}
+
+const choiceClass =
+  "inline-flex min-h-9 cursor-pointer items-center rounded-full border border-mesh px-3.5 text-[13px] text-ink-soft transition-colors hover:bg-pan-hover has-checked:border-graphite has-checked:bg-sheet has-checked:font-[560] has-checked:text-graphite has-focus-visible:outline-2 has-focus-visible:outline-graphite has-focus-visible:outline-offset-2 max-[700px]:min-h-11 max-[700px]:text-[15px]";
+
+export function Choice({
+  className,
+  children,
+  ...input
+}: Omit<ComponentProps<"input">, "className" | "children"> & { className?: string; children: ReactNode }): JSX.Element {
+  return (
+    <label className={cn(choiceClass, className)}>
+      <input type="radio" {...input} className="sr-only" />
+      {children}
+    </label>
+  );
+}
+
+export function FieldError({ className, ...props }: ComponentProps<"p">): JSX.Element {
+  return <p role="alert" className={cn("text-[13px] text-alarm", className)} {...props} />;
 }

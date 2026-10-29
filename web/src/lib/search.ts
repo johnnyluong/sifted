@@ -14,6 +14,12 @@ export function parseTopicSearch(raw: Record<string, unknown>): TopicSearch {
   return { label: text(raw.label) };
 }
 
+export type DigestSearch = { topic?: number };
+
+export function parseDigestSearch(raw: Record<string, unknown>): DigestSearch {
+  return { topic: positive(raw.topic) };
+}
+
 function text(raw: unknown): string | undefined {
   return typeof raw === "string" && raw.trim() ? raw : undefined;
 }

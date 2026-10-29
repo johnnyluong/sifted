@@ -14,7 +14,7 @@ from sift.domain import BriefState, Channel, FailureKind, ItemStatus, Origin, Pr
 from sift.inbox import intake
 from sift.items import queries, store
 from sift.items.lifecycle import UserAction
-from sift.items.queries import ItemFilter
+from sift.items.queries import ItemFilter, Shelf
 from sift.items.views import ItemDetail
 from sift.llm.client import LLM
 from sift.llm.fake import FakeLLM
@@ -75,7 +75,8 @@ def topics() -> list[Topic]:
 
 
 def kept(*, topic_id: int | None = None, label: str | None = None) -> list[queries.ItemSummary]:
-    return queries.list_items(ItemFilter(statuses=queries.KEPT, topic_id=topic_id, label=label), llm_ready=True)
+    f = ItemFilter(statuses=frozenset(ItemStatus), shelf=Shelf.kept, topic_id=topic_id, label=label)
+    return queries.list_items(f, llm_ready=True)
 
 
 def item(item_id: int) -> ItemDetail:

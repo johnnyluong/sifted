@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from sift.domain import Decision, GoalCategory, ItemType, Source
-from sift.llm.client import extract_prompt, score_prompts
+from sift.llm.client import _image_blocks, extract_prompt, score_prompts
 from sift.llm.prompts import Prompt, _source
 from sift.llm.schemas import (
     ExtractInput,
@@ -73,13 +75,24 @@ def test_every_prompt_file_exists_and_renders() -> None:
     assert all(_source(p.value).strip() for p in Prompt)
 
 
-def test_image_type_comes_from_the_bytes() -> None:
-    from sift.llm.client import image_type
-
-    assert image_type(b"\xff\xd8\xff\xe0rest") == "image/jpeg"
-    assert image_type(b"\x89PNG\r\n") == "image/png"
-    assert image_type(b"RIFF\x00\x00\x00\x00WEBPVP8") == "image/webp"
-    assert image_type(b"not an image") is None
+def test_the_llm_is_sent_only_image_types_it_reads(tmp_path: Path) -> None:
+    files = {
+        "a.jpg": b"\xff\xd8\xff\xe0rest",
+        "b.png": b"\x89PNG\r\n\x1a\nrest",
+        "c.webp": b"RIFF\x00\x00\x00\x00WEBPVP8",
+        "d.gif": b"GIF89a\x01\x00",
+        "e.heic": b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00",
+        "f.txt": b"not an image",
+    }
+    for name, data in files.items():
+        (tmp_path / name).write_bytes(data)
+    blocks = _image_blocks([tmp_path / name for name in files])
+    assert [dict(b["source"]).get("media_type") for b in blocks if b["type"] == "image"] == [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+    ]
 
 
 def _count(node: object, key: str) -> int:

@@ -18,7 +18,16 @@ type Result<T> = { data: T; error?: never; response: Response } | { data?: never
 export async function unwrap<T>(call: Promise<Result<T>>): Promise<NonNullable<T>> {
   const result = await call;
   if (result.data != null) return result.data;
-  throw new ApiError(result.response.status, detailMessage(result.error) ?? result.response.statusText);
+  throw failure(result);
+}
+
+export async function ok(call: Promise<{ error?: unknown; response: Response }>): Promise<void> {
+  const result = await call;
+  if (!result.response.ok) throw failure(result);
+}
+
+function failure({ error, response }: { error?: unknown; response: Response }): ApiError {
+  return new ApiError(response.status, detailMessage(error) ?? response.statusText);
 }
 
 /** FastAPI sends `{detail: string}` from HTTPException and `{detail: [{msg}]}` from request validation. */

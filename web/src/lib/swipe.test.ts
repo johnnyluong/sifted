@@ -3,13 +3,27 @@ import { commitDistance, lockAxis, swipeActions, swipeOffset, swipeResult } from
 
 describe("swipeActions", () => {
   it("offers the server's allowed actions on each side", () => {
-    expect(swipeActions({ actions: ["archive", "done", "reprocess"] })).toEqual({
+    expect(swipeActions({ can_delete: false, actions: ["archive", "done", "reprocess"] })).toEqual({
       right: "done",
       left: "archive",
     });
-    expect(swipeActions({ actions: ["keep", "done", "reprocess"] })).toEqual({ right: "keep", left: undefined });
-    expect(swipeActions({ actions: ["archive", "retry"] })).toEqual({ right: undefined, left: "archive" });
-    expect(swipeActions({ actions: ["reprocess"] })).toEqual({ right: undefined, left: undefined });
+    expect(swipeActions({ can_delete: false, actions: ["undone", "reprocess"] })).toEqual({
+      right: "undone",
+      left: undefined,
+    });
+    expect(swipeActions({ can_delete: false, actions: ["archive", "retry"] })).toEqual({
+      right: undefined,
+      left: "archive",
+    });
+    expect(swipeActions({ can_delete: false, actions: [] })).toEqual({ right: undefined, left: undefined });
+  });
+
+  it("deletes on the left when the server allows it, where other shelves archive", () => {
+    expect(swipeActions({ can_delete: true, actions: ["keep", "done", "reprocess"] })).toEqual({
+      right: "keep",
+      left: "delete",
+    });
+    expect(swipeActions({ can_delete: true, actions: ["reprocess"] })).toEqual({ right: undefined, left: "delete" });
   });
 });
 

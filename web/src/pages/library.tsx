@@ -5,7 +5,7 @@ import { type JSX, useEffect, useRef, useState } from "react";
 import { api, ITEM_TYPES } from "@/api";
 import { ItemList } from "@/components/item-list";
 import { Empty, Page, PageHeader } from "@/components/page";
-import { isEditable } from "@/components/paste-box";
+import { ignoresShortcut } from "@/components/paste-box";
 import { Input, Select } from "@/components/ui/field";
 import { type LibrarySearch, parseLibrarySearch } from "@/lib/search";
 import { TYPES } from "@/lib/vocabulary";
@@ -20,6 +20,15 @@ export const keptRoute = createRoute({
   component: KeptPage,
 });
 
+export const wishlistRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/wishlist",
+  validateSearch: parseLibrarySearch,
+  loaderDeps: ({ search }) => search,
+  loader: ({ context, deps }) => context.queryClient.ensureQueryData(api.items({ view: "wishlist", ...deps })),
+  component: WishlistPage,
+});
+
 export const archivedRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/archived",
@@ -29,7 +38,7 @@ export const archivedRoute = createRoute({
   component: ArchivedPage,
 });
 
-type View = "kept" | "archived";
+type View = "kept" | "wishlist" | "archived";
 
 const COPY: Record<View, { title: string; subtitle: string; swipe: string; emptyTitle: string; empty: string }> = {
   kept: {
@@ -39,10 +48,17 @@ const COPY: Record<View, { title: string; subtitle: string; swipe: string; empty
     emptyTitle: "Nothing kept yet",
     empty: "Posts that serve a goal land here.",
   },
+  wishlist: {
+    title: "Wishlist",
+    subtitle: "Things you want to buy, kept whether or not they serve a goal. Mark one bought once you have it.",
+    swipe: "Swipe right once bought, left to archive.",
+    emptyTitle: "Nothing on your wishlist",
+    empty: "Products you save to buy for yourself land here. Add any post from its page.",
+  },
   archived: {
     title: "Archived",
-    subtitle: "Filtered out as noise. Nothing is deleted; keep anything the filter got wrong.",
-    swipe: "Swipe right to keep.",
+    subtitle: "Filtered out as noise. Keep anything the filter got wrong, and delete what you never want back.",
+    swipe: "Swipe right to keep, left to delete.",
     emptyTitle: "Nothing archived",
     empty: "Posts that miss your goals land here, with the reason.",
   },
@@ -50,6 +66,10 @@ const COPY: Record<View, { title: string; subtitle: string; swipe: string; empty
 
 function KeptPage(): JSX.Element {
   return <LibraryPage view="kept" search={useSearch({ from: "/kept" })} />;
+}
+
+function WishlistPage(): JSX.Element {
+  return <LibraryPage view="wishlist" search={useSearch({ from: "/wishlist" })} />;
 }
 
 function ArchivedPage(): JSX.Element {
@@ -78,7 +98,7 @@ function LibraryPage({ view, search }: { view: View; search: LibrarySearch }): J
       <LibraryFilters view={view} search={search} />
       <ItemList
         items={items}
-        variant="library"
+        variant={view === "wishlist" ? "wishlist" : "library"}
         empty={
           filtered ? (
             <Empty title="No matches">Clear the filters or try other words.</Empty>
@@ -124,7 +144,7 @@ function LibraryFilters({ view, search }: { view: View; search: LibrarySearch })
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "/" || isEditable(event.target)) return;
+      if (event.key !== "/" || ignoresShortcut(event)) return;
       event.preventDefault();
       box.current?.focus();
     };

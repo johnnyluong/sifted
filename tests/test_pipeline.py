@@ -32,6 +32,7 @@ from sift.llm.schemas import (
     ScoreInput,
     ScoreOutput,
 )
+from sift.media import SLIDE_LONG_EDGE
 from sift.models import Item
 from sift.runtime import Runtime
 from tests.conftest import Clock
@@ -90,6 +91,16 @@ async def test_carousel_slides_reach_extraction(
     workdir = rt.worker.deps.workdir(item_id)
     assert seen == [[str(workdir / "frames" / "slide_01.jpg"), str(workdir / "frames" / "slide_02.jpg")]]
     assert _row(item_id).status is ItemStatus.kept
+    sizes = {
+        subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", frame],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        for frame in seen[0]
+    }
+    assert sizes == {f"820,{SLIDE_LONG_EDGE}"}, "an Instagram slide keeps the slide edge"
 
 
 SHARE = "https://www.threads.com/share/BAa/"
@@ -301,7 +312,7 @@ class LinkingLLM(FakeLLM):
 
     def extract(self, inp: ExtractInput) -> tuple[ExtractOutput, str]:
         out, model = super().extract(inp)
-        details = ProductDetails(name="Pan", what_it_is="A pan", price=None, link=self.link)
+        details = ProductDetails(name="Pan", what_it_is="A pan", price=None, link=self.link, wishlist=True)
         card = ProductCard(
             item_type=ItemType.product,
             title=out.card.title,

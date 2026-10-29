@@ -14,7 +14,7 @@ Topic: the broad shelf this post sits on, the way this person would name it.
 {% endfor %}</topics>
 {% else %}There are no topics yet.
 {% endif %}
-{% if may_create_topic %}Only when none fits, set topic_id to null and propose new_topic: a broad name of 1 to 3 words ("SEO", "NYC restaurants", "Weeknight recipes"), never one post's subject.{% else %}Do not propose a new topic. If none fits, set both topic_id and new_topic to null.{% endif %}
+{% if may_create_topic %}Only when none fits, set topic_id to null and propose new_topic: a broad name of 1 to 3 words, the size of an area of life or a goal ("App building", "Marketing and growth", "NYC outings"), never one post's subject. Finer cuts such as "seo" are labels, not topics.{% else %}Do not propose a new topic. If none fits, set both topic_id and new_topic to null.{% endif %}
 {% if moves %}
 This person moved these posts to another topic. Follow their taxonomy:
 <moves>

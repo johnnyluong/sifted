@@ -39,7 +39,6 @@ describe("the import preview", () => {
     expect(value("already in Sift")).toBe("37");
     expect(value("links Sift can't read")).toBe("5");
     expect(value("new, newest first")).toBe("375");
-    expect(screen.getByText("380 Instagram · 32 Threads")).toBeTruthy();
   });
 
   it("starts the server's preselected Newest 100 by default", async () => {

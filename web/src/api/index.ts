@@ -1,10 +1,15 @@
 export { ApiError } from "./client";
 export { useImportEstimate } from "./estimate";
 export {
+  useAddImageSet,
+  useApplyRebuild,
   useApplySetup,
   useCreateGoal,
+  useCreateTopic,
+  useDeleteItem,
   useDismissSuggestion,
   useDissolveTopic,
+  useDraftRebuild,
   useDraftSetup,
   useGenerateDigest,
   useImportAction,
@@ -14,8 +19,12 @@ export {
   useRequestBrief,
   useSaveValues,
   useSetItemTopic,
+  useSetKeepReason,
+  useSetWishlist,
+  useStoreImage,
   useSubmitLinks,
   useUpdateGoal,
+  useUploadImage,
   useUploadImport,
 } from "./mutations";
 export { usePulse, useStatus } from "./pulse";

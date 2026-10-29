@@ -31,11 +31,11 @@ ALLOWED_FROM: dict[UserAction, frozenset[ItemStatus]] = {
 }
 
 
-NEEDS_SCORE: frozenset[UserAction] = frozenset({UserAction.keep, UserAction.done})
+NEEDS_FINISHED: frozenset[UserAction] = frozenset({UserAction.keep, UserAction.done})
 
 
-def allowed_actions(status: ItemStatus, *, scored: bool) -> list[UserAction]:
-    return [a for a, froms in ALLOWED_FROM.items() if status in froms and (scored or a not in NEEDS_SCORE)]
+def allowed_actions(status: ItemStatus, *, finished: bool) -> list[UserAction]:
+    return [a for a, froms in ALLOWED_FROM.items() if status in froms and (finished or a not in NEEDS_FINISHED)]
 
 
 class Checkpoints(Protocol):
@@ -47,21 +47,31 @@ class Checkpoints(Protocol):
     def extracted_at(self) -> datetime | None: ...
     @property
     def scored_at(self) -> datetime | None: ...
+    @property
+    def processed_at(self) -> datetime | None: ...
+    @property
+    def wishlist(self) -> bool: ...
 
 
 def next_stage(item: Checkpoints) -> Stage | None:
+    if item.processed_at is not None:
+        return None
     if item.fetched_at is None:
         return Stage.fetch
     if item.media_processed_at is None:
         return Stage.media
     if item.extracted_at is None:
         return Stage.extract
-    if item.scored_at is None:
+    if item.scored_at is None and not item.wishlist:
         return Stage.score
     return None
 
 
-def running_status(stage: Stage) -> ItemStatus:
+def finished(item: Checkpoints) -> bool:
+    return next_stage(item) is None
+
+
+def running_status(stage: Stage | None) -> ItemStatus:
     return ItemStatus.fetching if stage in (Stage.fetch, Stage.media) else ItemStatus.processing
 
 
@@ -107,5 +117,31 @@ def threshold_decision(score: int, threshold: int) -> Decision:
     return Decision.keep if score >= threshold else Decision.archive
 
 
-def disposition(threshold_dec: Decision, override: Decision | None) -> Literal[ItemStatus.kept, ItemStatus.archived]:
-    return ItemStatus.kept if (override or threshold_dec) is Decision.keep else ItemStatus.archived
+def takes_keep_reason(override: Decision | None, threshold_dec: Decision | None) -> bool:
+    return override is Decision.keep and threshold_dec is Decision.archive
+
+
+def disposition(
+    threshold_dec: Decision, override: Decision | None, *, wishlist: bool, wishlist_override: bool | None
+) -> Literal[ItemStatus.kept, ItemStatus.archived]:
+    """Most important first: your add to the wishlist, your Keep or Archive, the wishlist flag, the threshold."""
+    if wishlist_override:
+        return ItemStatus.kept
+    decision = override or (Decision.keep if wishlist else threshold_dec)
+    return ItemStatus.kept if decision is Decision.keep else ItemStatus.archived
+
+
+WISHLIST_FROM: frozenset[ItemStatus] = frozenset({ItemStatus.kept, ItemStatus.archived})
+WISHLIST_SHELF: frozenset[ItemStatus] = frozenset({ItemStatus.kept})
+
+
+def on_wishlist_shelf(status: ItemStatus, *, wishlist: bool) -> bool:
+    return wishlist and status in WISHLIST_SHELF
+
+
+def can_set_wishlist(status: ItemStatus, *, extracted: bool) -> bool:
+    return extracted and status in WISHLIST_FROM
+
+
+def can_delete(status: ItemStatus) -> bool:
+    return status is ItemStatus.archived

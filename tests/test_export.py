@@ -38,12 +38,12 @@ NEW_SHAPE = {
             "timestamp": 1729000500000,
             "label_values": [{"label": "URL", "value": "https://www.instagram.com/reel/MS1/"}],
         },
+        {"timestamp": 1729000600, "value": "see https://www.instagram.com/stories/chef/3456/ too"},
     ]
 }
 THREADS_SAVED = {
     "text_post_app_saved": [
         {"timestamp": 1727000000, "media": [{"uri": "https://www.threads.com/@chef/post/THR1"}]},
-        {"timestamp": 1727000100, "value": "see https://www.instagram.com/stories/chef/3456/ too"},
     ]
 }
 LIKED = {"likes_media_likes": [{"string_map_data": {"": {"href": "https://www.instagram.com/p/LIKED1/"}}}]}
@@ -80,12 +80,11 @@ def test_reads_only_saved_files(tmp_path: Path) -> None:
     scan = export.scan(_full_export(tmp_path))
     assert scan.files_read == [
         "your_instagram_activity/saved/saved_posts.json",
-        "your_instagram_activity/threads/saved_threads.json",
         "your_instagram_activity/saved/saved_collections.json",
     ]
     codes = {link.ref.canonical_id for link in scan.links}
-    assert codes == {"OLD1", "NEW1", "MS1", "THR1"}
-    assert not codes & {"LIKED1", "SEEN1", "DM1"}
+    assert codes == {"OLD1", "NEW1", "MS1"}
+    assert not codes & {"LIKED1", "SEEN1", "DM1", "THR1"}
 
 
 def test_both_known_shapes_carry_their_saved_time(tmp_path: Path) -> None:
@@ -94,7 +93,6 @@ def test_both_known_shapes_carry_their_saved_time(tmp_path: Path) -> None:
     assert saved["OLD1"] == datetime.fromtimestamp(1698000000, UTC)
     assert saved["NEW1"] == datetime.fromtimestamp(1729000000, UTC)
     assert saved["MS1"] == datetime.fromtimestamp(1729000500, UTC), "milliseconds are read as such"
-    assert saved["THR1"] == datetime.fromtimestamp(1727000000, UTC)
 
 
 def test_profiles_are_dropped_and_stories_are_unreadable(tmp_path: Path) -> None:
@@ -104,8 +102,21 @@ def test_profiles_are_dropped_and_stories_are_unreadable(tmp_path: Path) -> None
         (Source.instagram, "MS1"),
         (Source.instagram, "NEW1"),
         (Source.instagram, "OLD1"),
-        (Source.threads, "THR1"),
     ]
+
+
+def test_a_threads_link_in_an_instagram_file_is_left_out(tmp_path: Path) -> None:
+    saved = {
+        "saved_saved_media": [{"timestamp": 1729000000, "media": [{"uri": "https://www.threads.com/@chef/post/THR2"}]}]
+    }
+    scan = export.scan(_zip(tmp_path, {"saved/saved_posts.json": saved}))
+    assert scan.links == [] and scan.unsupported == []
+
+
+def test_a_username_with_threads_in_it_still_imports(tmp_path: Path) -> None:
+    path = _zip(tmp_path, {"instagram-nyc_threads-2026-10-26/saved/saved_posts.json": OLD_SHAPE})
+    [link] = export.scan(path).links
+    assert link.ref.canonical_id == "OLD1"
 
 
 def test_a_post_saved_twice_counts_once_with_its_earliest_time(tmp_path: Path) -> None:
@@ -133,7 +144,7 @@ def test_html_export_is_read_without_dates(tmp_path: Path) -> None:
     [
         ("your_instagram_activity/saved/saved_posts.json", True),
         ("your_instagram_activity/saved/saved_collections.json", True),
-        ("your_instagram_activity/threads/saved_threads.json", True),
+        ("your_instagram_activity/threads/saved_threads.json", False),
         ("your_instagram_activity/likes/liked_posts.json", False),
         ("your_instagram_activity/messages/inbox/saved_by_grace_1/message_1.json", False),
         ("your_instagram_activity/saved/saved_posts.jpg", False),

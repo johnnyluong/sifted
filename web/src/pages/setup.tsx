@@ -13,12 +13,13 @@ import {
   type SetupQuestion,
   useApplySetup,
   useDraftSetup,
+  useStatus,
 } from "@/api";
-import { Page, PageHeader } from "@/components/page";
+import { Page, PageHeader, PageSection } from "@/components/page";
 import { Button } from "@/components/ui/button";
-import { Input, Label, LineInput, Select, Textarea } from "@/components/ui/field";
+import { Choice, FieldError, Input, Label, LineInput, Select, Textarea } from "@/components/ui/field";
 import { ANSWER_MAX, GOAL_DESCRIPTION_MAX, GOAL_TITLE_MAX, SETUP_ADD_MAX, VALUES_MAX } from "@/lib/limits";
-import { type Answers, filledAnswers, pick, startingAnswers } from "@/lib/setup";
+import { type Answers, filledAnswers, pick, removeWriteIn, startingAnswers, withTyped, writeIns } from "@/lib/setup";
 import { CATEGORIES } from "@/lib/vocabulary";
 import { rootRoute } from "./root";
 
@@ -55,12 +56,19 @@ function SetupPage(): JSX.Element {
         <Review
           plan={plan}
           goals={goals}
+          firstRun={firstRun}
           currentValues={values.values_text}
           answers={filledAnswers(setup.questions, answers)}
           onBack={() => setPlan(null)}
         />
       ) : (
-        <Questions questions={setup.questions} answers={answers} onChange={setAnswers} onDrafted={setPlan} />
+        <Questions
+          questions={setup.questions}
+          answers={answers}
+          kept={setup.kept_anyway.length}
+          onChange={setAnswers}
+          onDrafted={setPlan}
+        />
       )}
     </Page>
   );
@@ -69,18 +77,28 @@ function SetupPage(): JSX.Element {
 function Questions({
   questions,
   answers,
+  kept,
   onChange,
   onDrafted,
 }: {
   questions: SetupQuestion[];
   answers: Answers;
+  kept: number;
   onChange: (answers: Answers) => void;
   onDrafted: (plan: SetupPlan) => void;
 }): JSX.Element {
   const draft = useDraftSetup();
-  const filled = filledAnswers(questions, answers);
+  const [typed, setTyped] = useState<Record<string, string>>({});
+  const added = withTyped(questions, answers, typed);
+  const current: Answers = { ...answers };
+  for (const [id, a] of Object.entries(added)) if (a) current[id] = a;
+  const fits = Object.values(added).every(Boolean);
+  const filled = filledAnswers(questions, current);
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (!fits) return;
+    onChange(current);
+    setTyped({});
     draft.mutate(filled, { onSuccess: onDrafted });
   };
   return (
@@ -92,43 +110,55 @@ function Questions({
             key={q.id}
             question={q}
             answer={answer}
+            typed={typed[q.id] ?? ""}
+            added={added[q.id] ?? null}
+            onType={(text) => setTyped((t) => ({ ...t, [q.id]: text }))}
             onChange={(a) => onChange({ ...answers, [q.id]: a })}
           />
         );
       })}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-3">
-        <Button type="submit" variant="primary" disabled={draft.isPending || filled.length === 0}>
+        <Button type="submit" variant="primary" disabled={draft.isPending || filled.length === 0 || !fits}>
           {draft.isPending ? "Drafting..." : "Draft my goals"}
         </Button>
         <Link to="/goals" className="text-[13px] text-silt underline underline-offset-2 hover:text-graphite">
           Add goals by hand
         </Link>
       </div>
+      {kept > 0 && !draft.isPending && (
+        <p className="text-[13px] text-silt">
+          The draft also reads why you kept {kept === 1 ? "1 post" : `${kept} posts`} Sift would have archived.
+        </p>
+      )}
       {draft.isPending && (
         <p className="text-[13px] text-silt">Sift is reading your answers. This takes a few seconds.</p>
       )}
-      {draft.error && (
-        <p role="alert" className="text-[13px] text-alarm">
-          {draft.error.message}
-        </p>
-      )}
+      {draft.error && <FieldError>{draft.error.message}</FieldError>}
     </form>
   );
 }
 
-const choiceClass =
-  "inline-flex min-h-9 cursor-pointer items-center rounded-full border border-mesh px-3.5 text-[13px] text-ink-soft transition-colors hover:bg-pan-hover has-checked:border-graphite has-checked:bg-sheet has-checked:font-[560] has-checked:text-graphite has-focus-visible:outline-2 has-focus-visible:outline-graphite has-focus-visible:outline-offset-2 max-[700px]:min-h-11 max-[700px]:text-[15px]";
-
 function QuestionField({
   question: q,
   answer,
+  typed,
+  added,
+  onType,
   onChange,
 }: {
   question: SetupQuestion;
   answer: SetupAnswer;
+  typed: string;
+  added: SetupAnswer | null;
+  onType: (text: string) => void;
   onChange: (answer: SetupAnswer) => void;
 }): JSX.Element {
   const id = useId();
+  const add = () => {
+    if (!added) return;
+    onChange(added);
+    onType("");
+  };
   const hint = q.hint ? <p className="mb-2.5 text-[13px] text-silt">{q.hint}</p> : null;
   switch (q.kind) {
     case "text":
@@ -156,28 +186,49 @@ function QuestionField({
             {hint}
             <div className="flex flex-wrap gap-2">
               {q.choices.map((c) => (
-                <label key={c.id} className={choiceClass}>
-                  <input
-                    type={q.kind === "one" ? "radio" : "checkbox"}
-                    name={id}
-                    checked={answer.picked.includes(c.id)}
-                    onChange={() => onChange(pick(q, answer, c.id))}
-                    className="sr-only"
-                  />
+                <Choice
+                  key={c.id}
+                  type={q.kind === "one" ? "radio" : "checkbox"}
+                  name={id}
+                  checked={answer.picked.includes(c.id)}
+                  onChange={() => onChange(pick(q, answer, c.id))}
+                >
                   {c.label}
-                </label>
+                </Choice>
               ))}
+              {q.other &&
+                writeIns(answer).map((w) => (
+                  <Choice
+                    key={`write-in:${w}`}
+                    type="checkbox"
+                    checked
+                    onChange={() => onChange(removeWriteIn(answer, w))}
+                  >
+                    {w}
+                  </Choice>
+                ))}
             </div>
             {q.other && (
-              <Input
-                aria-label={q.other}
-                placeholder={q.other}
-                maxLength={ANSWER_MAX}
-                value={answer.text}
-                onChange={(e) => onChange({ ...answer, text: e.target.value })}
-                className="mt-3 max-w-sm"
-              />
+              <div className="mt-3 flex max-w-sm gap-2">
+                <Input
+                  aria-label={q.other}
+                  placeholder={q.other}
+                  maxLength={ANSWER_MAX}
+                  value={typed}
+                  onChange={(e) => onType(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" || e.nativeEvent.isComposing || e.keyCode === 229) return;
+                    e.preventDefault();
+                    add();
+                  }}
+                />
+                <Button type="button" onClick={add}>
+                  <Plus aria-hidden />
+                  Add
+                </Button>
+              </div>
             )}
+            {!added && <FieldError className="mt-2">No room for more. Remove one first.</FieldError>}
           </fieldset>
         </div>
       );
@@ -189,18 +240,21 @@ type DraftRow = GoalDraft & { key: number };
 function Review({
   plan,
   goals,
+  firstRun,
   currentValues,
   answers,
   onBack,
 }: {
   plan: SetupPlan;
   goals: Goal[];
+  firstRun: boolean;
   currentValues: string;
   answers: SetupAnswer[];
   onBack: () => void;
 }): JSX.Element {
   const apply = useApplySetup();
   const navigate = useNavigate();
+  const { nav } = useStatus();
   const [rows, setRows] = useState<DraftRow[]>(() => plan.add.map((g, key) => ({ ...g, key })));
   const [deactivate, setDeactivate] = useState(() => new Set(plan.deactivate));
   const [values, setValues] = useState(plan.values_text);
@@ -235,7 +289,8 @@ function Review({
       { answers, add, deactivate: kept.filter((g) => deactivate.has(g.id)).map((g) => g.id), values_text: values },
       {
         onSuccess: () => {
-          toast("Goals saved");
+          const rebuild = { label: "Rebuild topics", onClick: () => void navigate({ to: "/topics/rebuild" }) };
+          toast("Goals saved", !firstRun && nav.topics > 0 ? { action: rebuild } : undefined);
           void navigate({ to: "/goals" });
         },
       },
@@ -244,11 +299,11 @@ function Review({
 
   return (
     <form onSubmit={save} className="mt-8">
-      <section>
-        <h2 className="font-semibold">New goals</h2>
-        <p className="mt-0.5 mb-3 text-[13px] text-silt">
-          Edit or remove any of them. Sift scores every post you save against the goals you keep.
-        </p>
+      <PageSection
+        title="New goals"
+        hint="Edit or remove any of them. Sift scores every post you save against the goals you keep."
+        className="mt-0"
+      >
         {rows.length === 0 && (
           <p className="mb-3 surface px-4 py-3 text-[13px] text-silt">
             The draft has no new goals. Add one, or keep your current goals.
@@ -272,14 +327,13 @@ function Review({
           </Button>
           {full && <p className="text-[13px] text-silt">Up to {SETUP_ADD_MAX} new goals at a time.</p>}
         </div>
-      </section>
+      </PageSection>
 
       {kept.length > 0 && (
-        <section className="mt-10">
-          <h2 className="font-semibold">Your current goals</h2>
-          <p className="mt-0.5 mb-3 text-[13px] text-silt">
-            Uncheck a goal to turn it off. It stays on your Goals page, and you can turn it back on.
-          </p>
+        <PageSection
+          title="Your current goals"
+          hint="Uncheck a goal to turn it off. It stays on your Goals page, and you can turn it back on."
+        >
           <ul className="surface">
             {kept.map((g) => (
               <li key={g.id} className="border-mesh border-t first:border-t-0">
@@ -298,11 +352,10 @@ function Review({
               </li>
             ))}
           </ul>
-        </section>
+        </PageSection>
       )}
 
-      <section className="mt-10">
-        <h2 className="mb-3 font-semibold">Values</h2>
+      <PageSection title="Values">
         <div className="surface p-4">
           <Label htmlFor={valuesId}>What you care about, and what counts as noise</Label>
           <Textarea id={valuesId} maxLength={VALUES_MAX} value={values} onChange={(e) => setValues(e.target.value)} />
@@ -312,7 +365,7 @@ function Review({
             </Button>
           )}
         </div>
-      </section>
+      </PageSection>
 
       <div className="mt-8 flex flex-wrap items-center gap-3">
         <Button type="submit" variant="primary" disabled={apply.isPending}>
@@ -321,11 +374,7 @@ function Review({
         <Button type="button" variant="ghost" onClick={onBack}>
           Back to questions
         </Button>
-        {apply.error && (
-          <p role="alert" className="text-[13px] text-alarm">
-            {apply.error.message}
-          </p>
-        )}
+        {apply.error && <FieldError>{apply.error.message}</FieldError>}
       </div>
     </form>
   );

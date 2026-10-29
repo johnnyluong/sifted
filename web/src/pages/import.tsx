@@ -15,10 +15,11 @@ import {
 } from "@/api";
 import { Page, PageHeader } from "@/components/page";
 import { Button } from "@/components/ui/button";
+import { FieldError } from "@/components/ui/field";
 import { formatDay, formatMoment } from "@/lib/format";
 import { formatCountdown, formatDuration, formatGap, formatPerPost, formatUsd, progress } from "@/lib/imports";
 import { cn } from "@/lib/utils";
-import { HOLDS, IMPORT_ACTIONS, IMPORT_PHASES, PAUSE_REASONS, SOURCES } from "@/lib/vocabulary";
+import { HOLDS, IMPORT_ACTIONS, IMPORT_PHASES, PAUSE_REASONS } from "@/lib/vocabulary";
 import { rootRoute } from "./root";
 
 export const importRoute = createRoute({
@@ -32,10 +33,7 @@ function ImportPage(): JSX.Element {
   const { data: imports } = useSuspenseQuery(api.imports);
   return (
     <Page>
-      <PageHeader
-        title="Import saved posts"
-        subtitle="Bring in what you saved on Instagram and Threads before Sift existed."
-      />
+      <PageHeader title="Import saved posts" subtitle="Bring in what you saved on Instagram before Sift existed." />
       <ExportSteps open={imports.length === 0} />
       <ExportDrop />
       <div className="mt-6 flex flex-col gap-4">
@@ -128,11 +126,7 @@ export function ExportDrop(): JSX.Element {
           }}
         />
       </label>
-      {upload.error && (
-        <p role="alert" className="px-1 pt-2 text-[13px] text-alarm">
-          {upload.error.message}
-        </p>
-      )}
+      {upload.error && <FieldError className="px-1 pt-2">{upload.error.message}</FieldError>}
     </div>
   );
 }
@@ -182,10 +176,6 @@ export function ImportManifest({ view }: { view: Import }): JSX.Element {
   const [custom, setCustom] = useState(Math.min(counts.found, 25));
   const { run, pending } = useImportActionRunner(view);
   const group = useId();
-  const sources = (["instagram", "threads"] as const)
-    .filter((s) => view.by_source[s])
-    .map((s) => `${view.by_source[s]} ${SOURCES[s].label}`)
-    .join(" · ");
   const customLimit = Math.min(custom, counts.found);
   const posts =
     choice.kind === "custom"
@@ -199,7 +189,7 @@ export function ImportManifest({ view }: { view: Import }): JSX.Element {
       <FilesRead view={view} />
 
       <div className="mt-5 grid grid-cols-[1ch_6ch_minmax(0,1fr)] items-baseline gap-x-2.5 gap-y-1.5">
-        <LedgerRow sign="" value={counts.links + view.unsupported_count} label="saved posts" note={sources} />
+        <LedgerRow sign="" value={counts.links + view.unsupported_count} label="saved posts" />
         <LedgerRow sign="−" value={counts.duplicate} label="already in Sift" />
         <LedgerRow
           sign="−"

@@ -1,24 +1,26 @@
 import type { LucideIcon } from "lucide-react";
-import { Archive, FileArchive, Layers, Newspaper, Smartphone, Target } from "lucide-react";
+import { Archive, FileArchive, Gift, Layers, Milestone, Newspaper, Smartphone, Target } from "lucide-react";
 import type { NavCounts, Topic, TopicsView, UserAction } from "@/api";
 
 export type Shelf = {
   id: keyof NavCounts;
   label: string;
-  to: "/inbox" | "/kept" | "/archived";
+  to: "/inbox" | "/kept" | "/wishlist" | "/archived";
   accepts?: UserAction;
 };
 
 const ARCHIVED = { id: "archived", label: "Archived", to: "/archived", accepts: "archive" } as const satisfies Shelf;
+const WISHLIST = { id: "wishlist", label: "Wishlist", to: "/wishlist" } as const satisfies Shelf;
 
 export const SHELVES: readonly Shelf[] = [
   { id: "inbox", label: "Inbox", to: "/inbox" },
   { id: "kept", label: "Kept", to: "/kept", accepts: "keep" },
+  WISHLIST,
   ARCHIVED,
 ];
 
 export type Destination = {
-  to: "/digests" | "/topics" | "/archived" | "/goals" | "/import" | "/share";
+  to: "/digests" | "/topics" | "/wishlist" | "/archived" | "/goals" | "/import" | "/share" | "/roadmap";
   label: string;
   hint: string;
   icon: LucideIcon;
@@ -42,14 +44,23 @@ export const TOPICS: Destination = {
 
 export const SETTINGS: readonly Destination[] = [
   { to: "/goals", label: "Goals", hint: "What every post is scored against", icon: Target },
-  { to: "/import", label: "Import", hint: "Posts saved before Sift, from a Meta export", icon: FileArchive },
+  { to: "/import", label: "Import", hint: "Posts saved before Sift, from an Instagram export", icon: FileArchive },
   { to: "/share", label: "Save from iPhone", hint: "Send posts from the share sheet", icon: Smartphone },
 ];
 
+export const ROADMAP: Destination = {
+  to: "/roadmap",
+  label: "Roadmap",
+  hint: "What Sift does next",
+  icon: Milestone,
+};
+
 export const MORE: readonly Destination[] = [
   TOPICS,
+  { to: WISHLIST.to, label: WISHLIST.label, hint: "Things you want to buy", icon: Gift, count: WISHLIST.id },
   { to: ARCHIVED.to, label: ARCHIVED.label, hint: "Posts below your keep line", icon: Archive, count: ARCHIVED.id },
   ...SETTINGS,
+  ROADMAP,
 ];
 
 export function inMore(pathname: string): boolean {

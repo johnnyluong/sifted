@@ -19,6 +19,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/digests/topics/{topic_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Topic Digest */
+        get: operations["get_topic_digest_api_digests_topics__topic_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/digests/{digest_id}": {
         parameters: {
             query?: never;
@@ -186,7 +203,8 @@ export interface paths {
         get: operations["get_item_api_items__item_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete Item */
+        delete: operations["delete_item_api_items__item_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -203,6 +221,23 @@ export interface paths {
         put?: never;
         /** Act */
         post: operations["act_api_items__item_id__actions__action__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/items/{item_id}/keep-reason": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Keep Reason */
+        put: operations["set_keep_reason_api_items__item_id__keep_reason_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -236,6 +271,23 @@ export interface paths {
         get?: never;
         /** Move Item */
         put: operations["move_item_api_items__item_id__topic_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/items/{item_id}/wishlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Wishlist */
+        put: operations["set_wishlist_api_items__item_id__wishlist_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -338,7 +390,42 @@ export interface paths {
         /** List Topics */
         get: operations["list_topics_api_topics_get"];
         put?: never;
-        post?: never;
+        /** Create Topic */
+        post: operations["create_topic_api_topics_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/topics/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Rebuild */
+        post: operations["apply_rebuild_api_topics_rebuild_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/topics/rebuild/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Draft Rebuild */
+        post: operations["draft_rebuild_api_topics_rebuild_draft_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -409,6 +496,74 @@ export interface paths {
         put?: never;
         /** Dismiss Suggestion */
         post: operations["dismiss_suggestion_api_topics__topic_id__suggestions__into_id__dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Image */
+        post: operations["upload_image_api_uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Store Image */
+        post: operations["store_image_api_uploads_files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads/sets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Image Set */
+        post: operations["upload_image_set_api_uploads_sets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Uploaded Image */
+        get: operations["uploaded_image_api_uploads__name__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -630,12 +785,22 @@ export interface components {
              * @description Up to 3 kept posts to act on, in the digest's order. A done or archived pick gives its place to the next.
              */
             top: components["schemas"]["DigestPick"][];
+            /**
+             * Wishlist
+             * @description Up to 2 kept posts on your wishlist, chosen by code: never shown first, then the longest since shown. One bought or taken off the wishlist drops out.
+             */
+            wishlist: components["schemas"]["ItemSummary"][];
         };
         /** DigestsView */
         DigestsView: {
             /** Earlier */
             earlier: components["schemas"]["DigestHeader"][];
             latest: components["schemas"]["DigestView"] | null;
+            /**
+             * Topics
+             * @description Topics with a kept post, the most kept first.
+             */
+            topics: components["schemas"]["TopicDigestTab"][];
         };
         /** Dissolved */
         Dissolved: {
@@ -786,6 +951,20 @@ export interface components {
             /** How To Apply */
             how_to_apply: string | null;
         };
+        /** ImageSetBody */
+        ImageSetBody: {
+            /**
+             * Channel
+             * @default api
+             * @enum {string}
+             */
+            channel: "web" | "api";
+            /**
+             * Names
+             * @description Stored image names, in the order they are read.
+             */
+            names: string[];
+        };
         /**
          * ImportAction
          * @enum {string}
@@ -826,10 +1005,6 @@ export interface components {
         ImportView: {
             /** Actions */
             actions: components["schemas"]["ImportAction"][];
-            /** By Source */
-            by_source: {
-                [key: string]: number;
-            };
             counts: components["schemas"]["ImportCounts"];
             /**
              * Created At
@@ -892,10 +1067,25 @@ export interface components {
         ItemDetail: {
             /** Actions */
             actions: components["schemas"]["UserAction"][];
+            /**
+             * Asks Keep Reason
+             * @description You kept it after the filter archived it, so it takes a reason.
+             */
+            asks_keep_reason: boolean;
             /** Attempts */
             attempts: number;
             /** Author Handle */
             author_handle: string | null;
+            /**
+             * Can Delete
+             * @description Delete applies now: only an archived post can be deleted.
+             */
+            can_delete: boolean;
+            /**
+             * Can Wishlist
+             * @description Add to wishlist or Remove from wishlist applies now.
+             */
+            can_wishlist: boolean;
             /** Caption */
             caption: string | null;
             /** Card */
@@ -918,9 +1108,16 @@ export interface components {
             gist: string | null;
             /** Id */
             id: number;
+            /**
+             * Images
+             * @description An image post's stored images in reading order; empty for other posts.
+             */
+            images: string[];
             /** In Motion */
             in_motion: boolean;
             item_type: components["schemas"]["ItemType"] | null;
+            /** @description Why you kept a post the filter archived, once you say. */
+            keep_reason: components["schemas"]["KeepReason"] | null;
             /** Labels */
             labels: string[];
             /** Last Error */
@@ -943,6 +1140,8 @@ export interface components {
             post_text: string | null;
             /** Processed At */
             processed_at: string | null;
+            /** @description Name, price and link from a product card. */
+            product: components["schemas"]["ProductFacts"] | null;
             /**
              * Received At
              * Format: date-time
@@ -976,6 +1175,21 @@ export interface components {
             user_override: components["schemas"]["Decision"] | null;
             /** Waiting For */
             waiting_for: ("llm" | "goals") | null;
+            /**
+             * Wishlist
+             * @description On the Wishlist shelf: kept even when it serves no goal, and Done reads Bought.
+             */
+            wishlist: boolean;
+            /**
+             * Wishlist Override
+             * @description Your hand choice: true added, false removed, null follows the extracted flag.
+             */
+            wishlist_override: boolean | null;
+            /**
+             * Wishlist Post
+             * @description On the wishlist by the extracted flag or your add, in any status; done, it reads Bought.
+             */
+            wishlist_post: boolean;
         };
         /** ItemMotion */
         ItemMotion: {
@@ -1032,6 +1246,11 @@ export interface components {
             actions: components["schemas"]["UserAction"][];
             /** Author Handle */
             author_handle: string | null;
+            /**
+             * Can Delete
+             * @description Delete applies now: only an archived post can be deleted.
+             */
+            can_delete: boolean;
             /** @description Set whenever another post covers this one; the SPA nests the row only when the cover is listed. */
             covered_by: components["schemas"]["ItemRef"] | null;
             /** Display Title */
@@ -1063,6 +1282,8 @@ export interface components {
             /** Next Attempt At */
             next_attempt_at: string | null;
             origin_channel: components["schemas"]["Channel"];
+            /** @description Name, price and link from a product card. */
+            product: components["schemas"]["ProductFacts"] | null;
             /**
              * Received At
              * Format: date-time
@@ -1090,12 +1311,60 @@ export interface components {
             user_override: components["schemas"]["Decision"] | null;
             /** Waiting For */
             waiting_for: ("llm" | "goals") | null;
+            /**
+             * Wishlist
+             * @description On the Wishlist shelf: kept even when it serves no goal, and Done reads Bought.
+             */
+            wishlist: boolean;
+            /**
+             * Wishlist Post
+             * @description On the wishlist by the extracted flag or your add, in any status; done, it reads Bought.
+             */
+            wishlist_post: boolean;
         };
         /**
          * ItemType
          * @enum {string}
          */
         ItemType: "place" | "recipe" | "playbook" | "idea" | "product" | "other";
+        /** KeepReason */
+        KeepReason: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Goal Id
+             * @description The goal you kept it for; null when it fits none of your goals.
+             */
+            goal_id: number | null;
+            /** Goal Title */
+            goal_title: string | null;
+            /** Note */
+            note: string | null;
+        };
+        /** KeepReasonIn */
+        KeepReasonIn: {
+            /**
+             * Goal Id
+             * @description The active goal you kept it for; null when it fits none of your goals.
+             */
+            goal_id: number | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** KeptReason */
+        KeptReason: {
+            /** Item Id */
+            item_id: number;
+            reason: components["schemas"]["KeepReason"];
+            /** Title */
+            title: string;
+        };
         /** LabelCount */
         LabelCount: {
             /** Count */
@@ -1124,13 +1393,21 @@ export interface components {
             archived: number;
             /** Inbox */
             inbox: number;
-            /** Kept */
+            /**
+             * Kept
+             * @description Kept and done posts, leaving out kept posts on the wishlist.
+             */
             kept: number;
             /**
              * Topics
              * @description Topics with at least one kept post.
              */
             topics: number;
+            /**
+             * Wishlist
+             * @description Kept posts on the wishlist.
+             */
+            wishlist: number;
         };
         /**
          * Notice
@@ -1227,6 +1504,40 @@ export interface components {
             /** Why Notable */
             why_notable: string | null;
         };
+        /** PlannedTopic */
+        PlannedTopic: {
+            /**
+             * Continues
+             * @description Current topics it keeps or absorbs; empty for a new topic.
+             */
+            continues: components["schemas"]["TopicRef"][];
+            /** Description */
+            description: string;
+            /** Name */
+            name: string;
+            /** Posts */
+            posts: components["schemas"]["ItemRef"][];
+        };
+        /** PlannedTopicIn */
+        PlannedTopicIn: {
+            /**
+             * Continues
+             * @description ids of current topics it keeps or absorbs.
+             */
+            continues: number[];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Name */
+            name: string;
+            /**
+             * Posts
+             * @description ids of the kept posts placed on it.
+             */
+            posts: number[];
+        };
         /** PlaybookCard */
         PlaybookCard: {
             details: components["schemas"]["PlaybookDetails"];
@@ -1308,6 +1619,20 @@ export interface components {
             price: string | null;
             /** What It Is */
             what_it_is: string;
+            /**
+             * Wishlist
+             * @description True when it is something I might buy for myself: a physical product, clothing, gear, home goods, a ticketed or paid event, a paid app or course. False for free software, open-source repos and services to research.
+             */
+            wishlist: boolean;
+        };
+        /** ProductFacts */
+        ProductFacts: {
+            /** Link */
+            link: string | null;
+            /** Name */
+            name: string;
+            /** Price */
+            price: string | null;
         };
         /** Pulse */
         Pulse: {
@@ -1344,6 +1669,38 @@ export interface components {
              * @enum {string}
              */
             kind: "queued";
+        };
+        /** RebuildApply */
+        RebuildApply: {
+            /**
+             * Resort
+             * @description Posts the draft offered that no topic takes; Sift sorts them.
+             * @default []
+             */
+            resort: number[];
+            /**
+             * Retire
+             * @description Current topics to remove. A topic named nowhere stays as it is.
+             * @default []
+             */
+            retire: number[];
+            /** Topics */
+            topics: components["schemas"]["PlannedTopicIn"][];
+        };
+        /** RebuildPlan */
+        RebuildPlan: {
+            /**
+             * Retiring
+             * @description Current topics no planned topic continues.
+             */
+            retiring: components["schemas"]["TopicRef"][];
+            /** Topics */
+            topics: components["schemas"]["PlannedTopic"][];
+            /**
+             * Unsorted
+             * @description Kept posts the draft placed nowhere; Sift sorts them after you apply.
+             */
+            unsorted: components["schemas"]["ItemRef"][];
         };
         /** RecipeCard */
         RecipeCard: {
@@ -1473,16 +1830,31 @@ export interface components {
              * @description The answers from the last setup you saved; empty before the first.
              */
             answers: components["schemas"]["SetupAnswer"][];
+            /**
+             * Kept Anyway
+             * @description The 20 latest posts you kept with a reason.
+             */
+            kept_anyway: components["schemas"]["KeptReason"][];
+            /**
+             * Kept Since Setup
+             * @description How many reasons you gave since setup_at, or ever before a setup.
+             */
+            kept_since_setup: number;
             /** Questions */
             questions: components["schemas"]["SetupQuestion"][];
             /** Setup At */
             setup_at: string | null;
         };
         /**
+         * Shelf
+         * @enum {string}
+         */
+        Shelf: "inbox" | "kept" | "wishlist" | "archived";
+        /**
          * Source
          * @enum {string}
          */
-        Source: "instagram" | "threads";
+        Source: "instagram" | "threads" | "image";
         /** SourceView */
         SourceView: {
             /**
@@ -1548,6 +1920,14 @@ export interface components {
              */
             timezone: string;
         };
+        /** StoredImage */
+        StoredImage: {
+            /**
+             * Name
+             * @description The stored image's name, for POST /api/uploads/sets.
+             */
+            name: string;
+        };
         /** SubmitBody */
         SubmitBody: {
             /**
@@ -1558,6 +1938,31 @@ export interface components {
             channel: "web" | "api";
             /** Text */
             text: string;
+        };
+        /** TopicCreate */
+        TopicCreate: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Name */
+            name: string;
+            /**
+             * Sort Posts
+             * @description Move the kept posts that fit the new topic better onto it.
+             * @default true
+             */
+            sort_posts: boolean;
+        };
+        /** TopicCreated */
+        TopicCreated: {
+            /**
+             * Not Moved
+             * @description Why no kept posts were moved, when you asked for them to be.
+             */
+            not_moved: string | null;
+            topic: components["schemas"]["TopicDetail"];
         };
         /** TopicDetail */
         TopicDetail: {
@@ -1600,6 +2005,34 @@ export interface components {
             scores: number[];
             /** Top Labels */
             top_labels: string[];
+        };
+        /** TopicDigestTab */
+        TopicDigestTab: {
+            /**
+             * Open
+             * @description Posts on the topic still kept, not done.
+             */
+            open: number;
+            topic: components["schemas"]["TopicRef"];
+        };
+        /** TopicDigestView */
+        TopicDigestView: {
+            /**
+             * New
+             * @description The topic's other new kept posts, new as the weekly digest counts it.
+             */
+            new: components["schemas"]["DigestLine"][];
+            /**
+             * Next
+             * @description Up to 3 kept posts on the topic to act on, highest score first; a post not yet in a digest wins a tie.
+             */
+            next: components["schemas"]["DigestPick"][];
+            /**
+             * Overview
+             * @description The brief's overview, else the topic's description.
+             */
+            overview: string;
+            topic: components["schemas"]["TopicRef"];
         };
         /** TopicGroup */
         TopicGroup: {
@@ -1708,6 +2141,14 @@ export interface components {
             /** Values Text */
             values_text: string;
         };
+        /** WishlistIn */
+        WishlistIn: {
+            /**
+             * On
+             * @description true adds, false removes, null clears your choice for the extracted flag.
+             */
+            on: boolean | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -1745,6 +2186,7 @@ export type HttpValidationError = components['schemas']['HTTPValidationError'];
 export type Hold = components['schemas']['Hold'];
 export type IdeaCard = components['schemas']['IdeaCard'];
 export type IdeaDetails = components['schemas']['IdeaDetails'];
+export type ImageSetBody = components['schemas']['ImageSetBody'];
 export type ImportAction = components['schemas']['ImportAction'];
 export type ImportCounts = components['schemas']['ImportCounts'];
 export type ImportPhase = components['schemas']['ImportPhase'];
@@ -1757,6 +2199,9 @@ export type ItemRef = components['schemas']['ItemRef'];
 export type ItemStatus = components['schemas']['ItemStatus'];
 export type ItemSummary = components['schemas']['ItemSummary'];
 export type ItemType = components['schemas']['ItemType'];
+export type KeepReason = components['schemas']['KeepReason'];
+export type KeepReasonIn = components['schemas']['KeepReasonIn'];
+export type KeptReason = components['schemas']['KeptReason'];
 export type LabelCount = components['schemas']['LabelCount'];
 export type MediaKind = components['schemas']['MediaKind'];
 export type MergeBody = components['schemas']['MergeBody'];
@@ -1769,15 +2214,20 @@ export type PaceView = components['schemas']['PaceView'];
 export type PauseReason = components['schemas']['PauseReason'];
 export type PlaceCard = components['schemas']['PlaceCard'];
 export type PlaceDetails = components['schemas']['PlaceDetails'];
+export type PlannedTopic = components['schemas']['PlannedTopic'];
+export type PlannedTopicIn = components['schemas']['PlannedTopicIn'];
 export type PlaybookCard = components['schemas']['PlaybookCard'];
 export type PlaybookDetails = components['schemas']['PlaybookDetails'];
 export type PostCost = components['schemas']['PostCost'];
 export type ProductCard = components['schemas']['ProductCard'];
 export type ProductDetails = components['schemas']['ProductDetails'];
+export type ProductFacts = components['schemas']['ProductFacts'];
 export type Pulse = components['schemas']['Pulse'];
 export type QuestionKind = components['schemas']['QuestionKind'];
 export type QueueOption = components['schemas']['QueueOption'];
 export type QueuedSubmission = components['schemas']['QueuedSubmission'];
+export type RebuildApply = components['schemas']['RebuildApply'];
+export type RebuildPlan = components['schemas']['RebuildPlan'];
 export type RecipeCard = components['schemas']['RecipeCard'];
 export type RecipeDetails = components['schemas']['RecipeDetails'];
 export type RejectedSubmission = components['schemas']['RejectedSubmission'];
@@ -1787,13 +2237,19 @@ export type SetupApply = components['schemas']['SetupApply'];
 export type SetupPlan = components['schemas']['SetupPlan'];
 export type SetupQuestion = components['schemas']['SetupQuestion'];
 export type SetupView = components['schemas']['SetupView'];
+export type Shelf = components['schemas']['Shelf'];
 export type Source = components['schemas']['Source'];
 export type SourceView = components['schemas']['SourceView'];
 export type Stage = components['schemas']['Stage'];
 export type StartBody = components['schemas']['StartBody'];
 export type StatusView = components['schemas']['StatusView'];
+export type StoredImage = components['schemas']['StoredImage'];
 export type SubmitBody = components['schemas']['SubmitBody'];
+export type TopicCreate = components['schemas']['TopicCreate'];
+export type TopicCreated = components['schemas']['TopicCreated'];
 export type TopicDetail = components['schemas']['TopicDetail'];
+export type TopicDigestTab = components['schemas']['TopicDigestTab'];
+export type TopicDigestView = components['schemas']['TopicDigestView'];
 export type TopicGroup = components['schemas']['TopicGroup'];
 export type TopicMove = components['schemas']['TopicMove'];
 export type TopicPatch = components['schemas']['TopicPatch'];
@@ -1803,6 +2259,7 @@ export type TopicsView = components['schemas']['TopicsView'];
 export type UserAction = components['schemas']['UserAction'];
 export type ValidationError = components['schemas']['ValidationError'];
 export type ValuesBody = components['schemas']['ValuesBody'];
+export type WishlistIn = components['schemas']['WishlistIn'];
 export type $defs = Record<string, never>;
 export interface operations {
     list_digests_api_digests_get: {
@@ -1841,6 +2298,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DigestView"];
+                };
+            };
+        };
+    };
+    get_topic_digest_api_digests_topics__topic_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                topic_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopicDigestView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2149,7 +2637,7 @@ export interface operations {
     list_items_api_items_get: {
         parameters: {
             query?: {
-                view?: ("inbox" | "kept" | "archived") | null;
+                view?: components["schemas"]["Shelf"] | null;
                 status?: components["schemas"]["ItemStatus"][];
                 goal_id?: number | null;
                 type?: components["schemas"]["ItemType"] | null;
@@ -2248,6 +2736,49 @@ export interface operations {
             };
         };
     };
+    delete_item_api_items__item_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such post. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Only an archived post can be deleted. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     act_api_items__item_id__actions__action__post: {
         parameters: {
             query?: never;
@@ -2268,6 +2799,55 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ItemDetail"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_keep_reason_api_items__item_id__keep_reason_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeepReasonIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemDetail"];
+                };
+            };
+            /** @description No such post or active goal. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description You did not keep it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -2343,6 +2923,55 @@ export interface operations {
                 content?: never;
             };
             /** @description The post is not organized yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_wishlist_api_items__item_id__wishlist_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WishlistIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemDetail"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Only kept or archived posts. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2542,6 +3171,134 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TopicsView"];
                 };
+            };
+        };
+    };
+    create_topic_api_topics_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TopicCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopicCreated"];
+                };
+            };
+            /** @description A topic has that name, or there are already as many topics as Sift keeps. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_rebuild_api_topics_rebuild_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildApply"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopicsView"];
+                };
+            };
+            /** @description A topic in the plan no longer exists. Posts changed since the draft are skipped. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Two topics share a name, or a topic or post appears twice. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_rebuild_api_topics_rebuild_draft_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPlan"];
+                };
+            };
+            /** @description Fewer than two kept posts. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The LLM call failed. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No LLM is configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2754,6 +3511,155 @@ export interface operations {
             };
         };
     };
+    upload_image_api_uploads_post: {
+        parameters: {
+            query?: {
+                channel?: "web" | "api";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/*": Blob;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": (components["schemas"]["QueuedSubmission"] | components["schemas"]["DuplicateSubmission"] | components["schemas"]["RejectedSubmission"])[];
+                };
+            };
+            /** @description Over UPLOAD_MAX_BYTES. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not an image Sift can read. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    store_image_api_uploads_files_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/*": Blob;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredImage"];
+                };
+            };
+            /** @description Over UPLOAD_MAX_BYTES. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not an image Sift can read. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    upload_image_set_api_uploads_sets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImageSetBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": (components["schemas"]["QueuedSubmission"] | components["schemas"]["DuplicateSubmission"] | components["schemas"]["RejectedSubmission"])[];
+                };
+            };
+            /** @description Over the set limit, or an image that is not stored. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    uploaded_image_api_uploads__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description An image you sent to Sift, as stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_values_api_values_get: {
         parameters: {
             query?: never;
@@ -2816,7 +3722,7 @@ type ReadonlyArray<T> = [
 ] extends [
     unknown[]
 ] ? Readonly<Exclude<T, undefined>> : Readonly<Exclude<T, undefined>[]>;
-export const pathsApiItemsGetParametersQueryViewAnyOf0Values: ReadonlyArray<FlattenedDeepRequired<paths>["/api/items"]["get"]["parameters"]["query"]["view"]> = ["inbox", "kept", "archived"];
+export const pathsApiUploadsPostParametersQueryChannelValues: ReadonlyArray<FlattenedDeepRequired<paths>["/api/uploads"]["post"]["parameters"]["query"]["channel"]> = ["web", "api"];
 export const briefStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["BriefState"]> = ["none", "fresh", "stale", "writing"];
 export const channelValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Channel"]> = ["web", "cli", "api", "telegram", "export"];
 export const decisionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Decision"]> = ["keep", "archive"];
@@ -2826,6 +3732,7 @@ export const failureKindValues: ReadonlyArray<FlattenedDeepRequired<components>[
 export const goalCategoryValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["GoalCategory"]> = ["personal", "professional", "entrepreneurial", "other"];
 export const holdValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Hold"]> = ["in_flight", "daily_cap", "gap"];
 export const ideaCardItem_typeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["IdeaCard"]["item_type"]> = ["idea"];
+export const imageSetBodyChannelValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ImageSetBody"]["channel"]> = ["web", "api"];
 export const importActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ImportAction"]> = ["start", "pause", "resume", "cancel"];
 export const importPhaseValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ImportPhase"]> = ["preview", "running", "paused", "finished", "cancelled"];
 export const itemDetailWaiting_forAnyOf0Values: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ItemDetail"]["waiting_for"]> = ["llm", "goals"];
@@ -2844,7 +3751,8 @@ export const questionKindValues: ReadonlyArray<FlattenedDeepRequired<components>
 export const queuedSubmissionKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["QueuedSubmission"]["kind"]> = ["queued"];
 export const recipeCardItem_typeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["RecipeCard"]["item_type"]> = ["recipe"];
 export const rejectedSubmissionKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["RejectedSubmission"]["kind"]> = ["rejected"];
-export const sourceValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Source"]> = ["instagram", "threads"];
+export const shelfValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Shelf"]> = ["inbox", "kept", "wishlist", "archived"];
+export const sourceValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Source"]> = ["instagram", "threads", "image"];
 export const stageValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Stage"]> = ["fetch", "media", "extract", "score"];
 export const statusViewLlmAnyOf0Values: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["StatusView"]["llm"]> = ["anthropic", "fake"];
 export const submitBodyChannelValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SubmitBody"]["channel"]> = ["web", "api"];

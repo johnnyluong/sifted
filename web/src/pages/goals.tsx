@@ -3,10 +3,19 @@ import { createRoute, Link } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { type FormEvent, type JSX, useId, useState } from "react";
 import { toast } from "sonner";
-import { api, GOAL_CATEGORIES, type Goal, type GoalCategory, useCreateGoal, useSaveValues, useUpdateGoal } from "@/api";
-import { Page, PageHeader } from "@/components/page";
+import {
+  api,
+  GOAL_CATEGORIES,
+  type Goal,
+  type GoalCategory,
+  type SetupView,
+  useCreateGoal,
+  useSaveValues,
+  useUpdateGoal,
+} from "@/api";
+import { Page, PageHeader, PageSection } from "@/components/page";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select, Textarea } from "@/components/ui/field";
+import { FieldError, Input, Label, Select, Textarea } from "@/components/ui/field";
 import { GOAL_DESCRIPTION_MAX, GOAL_TITLE_MAX, VALUES_MAX } from "@/lib/limits";
 import { cn } from "@/lib/utils";
 import { CATEGORIES } from "@/lib/vocabulary";
@@ -16,23 +25,29 @@ export const goalsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/goals",
   loader: ({ context }) =>
-    Promise.all([context.queryClient.ensureQueryData(api.goals), context.queryClient.ensureQueryData(api.values)]),
+    Promise.all([
+      context.queryClient.ensureQueryData(api.goals),
+      context.queryClient.ensureQueryData(api.values),
+      context.queryClient.ensureQueryData(api.setup),
+    ]),
   component: GoalsPage,
 });
 
 function GoalsPage(): JSX.Element {
   const { data: goals } = useSuspenseQuery(api.goals);
   const { data: values } = useSuspenseQuery(api.values);
+  const { data: setup } = useSuspenseQuery(api.setup);
   const none = goals.length === 0;
   const [adding, setAdding] = useState(false);
   return (
     <Page>
       <PageHeader title="Goals" subtitle="Every saved post is scored against your active goals and values." />
 
-      <section className="mt-8">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <h2 className="font-semibold">Your goals</h2>
-          {!none && (
+      <PageSection
+        title="Your goals"
+        className="mt-8"
+        aside={
+          !none && (
             <div className="flex gap-2">
               <Button size="sm" asChild>
                 <Link to="/setup">Redo setup</Link>
@@ -44,8 +59,9 @@ function GoalsPage(): JSX.Element {
                 </Button>
               )}
             </div>
-          )}
-        </div>
+          )
+        }
+      >
         {adding && (
           <div className="mb-3 surface p-4">
             <GoalForm onDone={() => setAdding(false)} onCancel={() => setAdding(false)} />
@@ -75,13 +91,50 @@ function GoalsPage(): JSX.Element {
             ))}
           </ul>
         )}
-      </section>
+      </PageSection>
 
-      <section className="mt-10">
-        <h2 className="mb-3 font-semibold">Values</h2>
+      {!none && <KeptSinceSetup setup={setup} />}
+
+      <PageSection title="Values">
         <ValuesForm text={values.values_text} />
-      </section>
+      </PageSection>
     </Page>
+  );
+}
+
+function KeptSinceSetup({ setup }: { setup: SetupView }): JSX.Element | null {
+  const count = setup.kept_since_setup;
+  if (count === 0) return null;
+  const kept = setup.kept_anyway.slice(0, Math.min(3, count));
+  return (
+    <section aria-labelledby="kept-since-setup" className="mt-6 surface surface-pad">
+      <h2 id="kept-since-setup" className="font-semibold">
+        {count === 1 ? "1 post you kept" : `${count} posts you kept`} that Sift would have archived
+      </h2>
+      <p className="mt-0.5 text-[13px] text-silt leading-[19px]">
+        Redo setup and Sift drafts goals that cover them. Nothing changes until you save the draft.
+      </p>
+      <ul className="mt-3 flex flex-col gap-2">
+        {kept.map((k) => (
+          <li key={k.item_id} className="min-w-0">
+            <Link
+              to="/items/$itemId"
+              params={{ itemId: k.item_id }}
+              className="block truncate font-[560] hover:underline hover:underline-offset-2"
+            >
+              {k.title}
+            </Link>
+            <p className="truncate text-[13px] text-silt">
+              {k.reason.goal_title ? `For ${k.reason.goal_title}` : "None of your goals"}
+              {k.reason.note && `: ${k.reason.note}`}
+            </p>
+          </li>
+        ))}
+      </ul>
+      <Button variant="primary" size="sm" asChild className="mt-4">
+        <Link to="/setup">Redo setup</Link>
+      </Button>
+    </section>
   );
 }
 
@@ -152,7 +205,7 @@ function GoalForm({ goal, onDone, onCancel }: { goal?: Goal; onDone: () => void;
           placeholder="Market my web app"
           aria-invalid={Boolean(error)}
         />
-        {error && <p className="mt-1.5 text-[13px] text-alarm">{error.message}</p>}
+        {error && <FieldError className="mt-1.5">{error.message}</FieldError>}
       </div>
       <div>
         <Label htmlFor={`${id}-why`}>Why it matters</Label>
@@ -223,7 +276,7 @@ function ValuesForm({ text }: { text: string }): JSX.Element {
         placeholder="I value craft, local spots and things I can try within a week. Hustle content and gadget hype are noise."
       />
       <div className="mt-3 flex items-center justify-end gap-3">
-        {save.error && <span className="mr-auto text-[13px] text-alarm">{save.error.message}</span>}
+        {save.error && <FieldError className="mr-auto">{save.error.message}</FieldError>}
         {saved && <span className="text-[13px] text-silt">Saved</span>}
         <Button type="submit" variant="primary" disabled={save.isPending}>
           Save values

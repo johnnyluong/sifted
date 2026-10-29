@@ -12,7 +12,7 @@ import uvicorn
 
 from sift import digest, doctor, runtime
 from sift.config import get_settings
-from sift.domain import Channel, ImportAction, Origin, Source
+from sift.domain import Channel, ImportAction, Origin
 from sift.inbox import export, imports, intake
 from sift.inbox.imports import ImportView
 from sift.items import queries
@@ -109,7 +109,6 @@ def _hours(seconds: int) -> str:
 
 def preview_lines(view: ImportView, limit: int | None, pace: imports.Pace) -> list[str]:
     c = view.counts
-    sources = ", ".join(f"{view.by_source[s]} {s.value.title()}" for s in Source if view.by_source[s])
     plan = imports.estimate(min(limit or c.found, c.found), pace)
     cost = (
         f"About ${plan.usd:.2f} (${view.per_post.usd:.4f} a post)"
@@ -123,7 +122,7 @@ def preview_lines(view: ImportView, limit: int | None, pace: imports.Pace) -> li
         for path in view.files_skipped_budget
     ]
     lines += [
-        f"{c.links + view.unsupported_count:>5} saved posts ({sources or 'none supported'})",
+        f"{c.links + view.unsupported_count:>5} saved posts",
         f"{c.duplicate:>5} already in Sift",
         f"{view.unsupported_count:>5} links Sift can't read (stories and the like)",
         f"{c.found:>5} new, newest first",

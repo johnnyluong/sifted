@@ -42,7 +42,7 @@ def _extract(
         title="Carbon steel pan",
         summary="A pan.",
         next_action=None,
-        details=ProductDetails(name="Pan", what_it_is="A pan", price=None, link=link),
+        details=ProductDetails(name="Pan", what_it_is="A pan", price=None, link=link, wishlist=True),
     )
     inp = ExtractInput(
         source=Source.instagram,

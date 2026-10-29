@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import blake2b
@@ -10,7 +10,7 @@ from typing import Protocol
 from pydantic import BaseModel
 
 from sift.domain import PointRef
-from sift.llm.schemas import BriefDraft, OutlineDraft, TopicPlanDraft
+from sift.llm.schemas import BriefDraft, OutlineDraft, TopicFitDraft, TopicPlanDraft, TopicRebuildDraft
 
 GIST_MAX = 100
 POINT_MAX = 200
@@ -303,3 +303,64 @@ def normalize_plan(draft: TopicPlanDraft, live_post_counts: Mapping[int, int], d
         merges.append((a, b))
         used |= {a, b}
     return Plan(tuple(topics.values()), tuple(merges[:MAX_MERGES]))
+
+
+@dataclass(frozen=True, slots=True)
+class RebuiltTopic:
+    topic: ProposedTopic
+    continues: tuple[int, ...]
+    posts: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Rebuild:
+    topics: tuple[RebuiltTopic, ...]
+    unsorted: tuple[int, ...]
+    retiring: tuple[int, ...]
+
+
+def normalize_rebuild(
+    draft: TopicRebuildDraft, topic_ids: Sequence[int], post_ids: Sequence[int], pinned: Mapping[int, int]
+) -> Rebuild:
+    """`pinned` maps a post moved by hand to its topic; it stays on whichever planned topic continues that one."""
+    groups: dict[str, tuple[ProposedTopic, list[int], list[int]]] = {}
+    for t in draft.topics:
+        p = proposed(t.name, t.description)
+        if p is None:
+            continue
+        if p.slug in groups:
+            groups[p.slug][1].extend(t.continues)
+            groups[p.slug][2].extend(t.posts)
+        elif len(groups) < MAX_TOPICS:
+            groups[p.slug] = (p, list(t.continues), list(t.posts))
+    offered_topics, offered_posts = set(topic_ids), set(post_ids)
+    continued_by: dict[int, str] = {}
+    placed: dict[int, str] = {}
+    for slug, (_, continues, posts) in groups.items():
+        for tid in continues:
+            if tid in offered_topics:
+                continued_by.setdefault(tid, slug)
+        for pid in posts:
+            if pid in offered_posts:
+                placed.setdefault(pid, slug)
+    for pid, tid in pinned.items():
+        if pid in offered_posts and tid in continued_by:
+            placed[pid] = continued_by[tid]
+    topics = (
+        RebuiltTopic(
+            p,
+            tuple(tid for tid in topic_ids if continued_by.get(tid) == slug),
+            tuple(pid for pid in post_ids if placed.get(pid) == slug),
+        )
+        for slug, (p, _, _) in groups.items()
+    )
+    return Rebuild(
+        topics=tuple(t for t in topics if t.continues or t.posts),
+        unsorted=tuple(pid for pid in post_ids if pid not in placed),
+        retiring=tuple(tid for tid in topic_ids if tid not in continued_by),
+    )
+
+
+def normalize_fit(draft: TopicFitDraft, offered: Sequence[int]) -> tuple[int, ...]:
+    wanted = set(draft.posts)
+    return tuple(pid for pid in offered if pid in wanted)

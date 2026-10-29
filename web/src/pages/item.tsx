@@ -1,22 +1,25 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createRoute, Link, notFound, useParams } from "@tanstack/react-router";
-import { ArrowLeft, ArrowUpRight, ChevronRight, RotateCw } from "lucide-react";
-import { type JSX, type ReactNode, useEffect, useEffectEvent } from "react";
+import { createRoute, Link, notFound, useNavigate, useParams } from "@tanstack/react-router";
+import { ArrowDown, ArrowUpRight, ChevronRight, Gift, RotateCw, Search, Trash2 } from "lucide-react";
+import { type JSX, type ReactNode, useEffect, useEffectEvent, useState } from "react";
 import { toast } from "sonner";
-import { ApiError, api, type ItemDetail, type UserAction, useItemAction, useStatus } from "@/api";
+import { ApiError, api, type ItemDetail, type UserAction, useItemAction, useSetWishlist, useStatus } from "@/api";
 import { CardBody, Facts, Section } from "@/components/card-body";
+import { ConfirmDelete, DELETE_LABEL } from "@/components/delete-post";
 import { DockPortal } from "@/components/dock";
+import { ImageNumber } from "@/components/image-set";
+import { KeepReasonPanel } from "@/components/keep-reason";
 import { Organization } from "@/components/organization";
-import { Page } from "@/components/page";
-import { isEditable } from "@/components/paste-box";
+import { BackLink, Page } from "@/components/page";
+import { ignoresShortcut } from "@/components/paste-box";
 import { ScoreInstrument, verdict } from "@/components/score-rail";
 import { StageTrack } from "@/components/stage-track";
 import { Thumb } from "@/components/thumb";
 import { Button } from "@/components/ui/button";
 import { formatChars, formatDay, formatMoment } from "@/lib/format";
 import { parseId } from "@/lib/search";
-import { cn } from "@/lib/utils";
-import { ACTIONS, primaryAction, SOURCES, TYPES } from "@/lib/vocabulary";
+import { cn, httpLink } from "@/lib/utils";
+import { ACTIONS, actionWords, primaryAction, SOURCES, TYPES } from "@/lib/vocabulary";
 import { rootRoute } from "./root";
 
 export const itemRoute = createRoute({
@@ -28,7 +31,11 @@ export const itemRoute = createRoute({
   },
   loader: async ({ context, params }) => {
     try {
-      return await context.queryClient.ensureQueryData(api.item(params.itemId));
+      const [item] = await Promise.all([
+        context.queryClient.ensureQueryData(api.item(params.itemId)),
+        context.queryClient.ensureQueryData(api.goals),
+      ]);
+      return item;
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) throw notFound();
       throw error;
@@ -37,7 +44,8 @@ export const itemRoute = createRoute({
   component: ItemPage,
 });
 
-function back(item: ItemDetail): { to: "/kept" | "/archived" | "/inbox"; label: string } {
+function back(item: ItemDetail): { to: "/kept" | "/wishlist" | "/archived" | "/inbox"; label: string } {
+  if (item.status === "kept" && item.wishlist) return { to: "/wishlist", label: "Wishlist" };
   if (item.status === "kept" || item.status === "done") return { to: "/kept", label: "Kept" };
   if (item.status === "archived") return { to: "/archived", label: "Archived" };
   return { to: "/inbox", label: "Inbox" };
@@ -46,18 +54,141 @@ function back(item: ItemDetail): { to: "/kept" | "/archived" | "/inbox"; label: 
 function ItemPage(): JSX.Element {
   const { itemId } = useParams({ from: "/items/$itemId" });
   const { data: item } = useSuspenseQuery(api.item(itemId));
+  return item.wishlist_post ? <WishlistItem item={item} /> : <PostItem item={item} />;
+}
+
+function WishlistItem({ item }: { item: ItemDetail }): JSX.Element {
+  const { timezone } = useStatus();
+  const to = back(item);
+  const card = item.card?.item_type === "product" ? item.card.details : null;
+  const otherCard = item.card && !card ? item.card : null;
+  const productName = item.product?.name.trim() || null;
+  const name = productName ?? item.display_title;
+  const search = otherCard ? null : (productName ?? item.title?.trim()) || null;
+  const about = card ? card.what_it_is : item.summary;
+  const picture = item.images[0] ?? item.thumbnail_url;
+  return (
+    <Page>
+      <BackLink to={to.to}>{to.label}</BackLink>
+      <div className="grid grid-cols-1 gap-x-10 gap-y-6 lg:grid-cols-2">
+        {picture ? (
+          <img
+            src={picture}
+            alt={name}
+            draggable={false}
+            className="aspect-square w-full rounded-lg border border-mesh bg-pan object-cover lg:aspect-[4/5]"
+          />
+        ) : (
+          <span
+            aria-hidden
+            className="grid aspect-square w-full place-items-center rounded-lg border border-mesh bg-pan font-mono text-silt lg:aspect-[4/5]"
+          >
+            {SOURCES[item.source].monogram}
+          </span>
+        )}
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2.5 text-caption text-silt">
+            <a href={item.url} target="_blank" rel="noopener noreferrer" className={ORIGINAL_CLASS}>
+              {SOURCES[item.source].label}
+              <ArrowUpRight aria-hidden className="size-3.5" />
+            </a>
+            <span className="font-mono text-micro">Added {formatDay(item.received_at, timezone)}</span>
+          </div>
+          <h1 className="mt-1.5 font-display font-[640] text-heading max-[700px]:text-[24px] max-[700px]:leading-[30px]">
+            {name}
+          </h1>
+          {item.product?.price && <p className="mt-1 font-mono text-[17px] text-graphite">{item.product.price}</p>}
+          {about && <p className="reading mt-3 text-ink-soft">{about}</p>}
+          {otherCard && (
+            <div className="mt-6">
+              <CardBody card={otherCard} />
+            </div>
+          )}
+          {item.stage === null ? (
+            <WhereToGet link={httpLink(item.product?.link)} search={search} original={item.url} />
+          ) : (
+            <div className="mt-6">
+              <Pending item={item} />
+            </div>
+          )}
+          <section className="surface surface-pad mt-6">
+            <span className={cn("font-[560]", item.status === "failed" && "text-alarm")}>{item.state_label}</span>
+            {item.stage !== null && (
+              <div className="mt-4">
+                <StageTrack item={item} />
+              </div>
+            )}
+            <ItemActions item={item} />
+            <WishlistToggle item={item} />
+            <DeletePost item={item} />
+          </section>
+        </div>
+      </div>
+      <SetImages images={item.images} />
+    </Page>
+  );
+}
+
+function WhereToGet({
+  link,
+  search,
+  original,
+}: {
+  link: string | null;
+  search: string | null;
+  original: string;
+}): JSX.Element {
+  if (link) {
+    return (
+      <Button asChild variant="primary" className="mt-5 w-full">
+        <a href={link} target="_blank" rel="noopener noreferrer">
+          Where to get it
+          <span className="min-w-0 truncate font-mono text-micro opacity-75">{hostname(link)}</span>
+          <ArrowUpRight aria-hidden />
+        </a>
+      </Button>
+    );
+  }
+  return (
+    <div className="mt-5">
+      <p className="text-[13px] text-silt">The post does not say where to get it.</p>
+      {search && (
+        <Button asChild variant="primary" className="mt-2 w-full">
+          <a
+            href={`https://www.google.com/search?q=${encodeURIComponent(search)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Search aria-hidden />
+            Find it online
+          </a>
+        </Button>
+      )}
+      <Button asChild className="mt-2 w-full">
+        <a href={original} target="_blank" rel="noopener noreferrer">
+          Open the original post
+          <ArrowUpRight aria-hidden />
+        </a>
+      </Button>
+    </div>
+  );
+}
+
+function hostname(link: string): string | null {
+  try {
+    return new URL(link).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+function PostItem({ item }: { item: ItemDetail }): JSX.Element {
   const { timezone } = useStatus();
   const type = item.item_type ? TYPES[item.item_type] : null;
   const to = back(item);
   return (
     <Page wide>
-      <Link
-        to={to.to}
-        className="mb-[18px] inline-flex items-center gap-1 text-[13px] text-silt hover:text-graphite max-[700px]:-my-3 max-[700px]:mb-1.5 max-[700px]:py-3 max-[700px]:text-[15px]"
-      >
-        <ArrowLeft aria-hidden className="size-3.5" />
-        {to.label}
-      </Link>
+      <BackLink to={to.to}>{to.label}</BackLink>
       <div className="grid grid-cols-1 gap-x-10 gap-y-7 lg:grid-cols-[minmax(0,1fr)_300px] lg:grid-rows-[auto_1fr] lg:gap-y-4">
         <header className="flex gap-4 lg:col-start-1">
           <Thumb url={item.thumbnail_url} size={72} placeholder={SOURCES[item.source].monogram} />
@@ -89,6 +220,7 @@ function ItemPage(): JSX.Element {
           )}
           <div className="mt-7 first:mt-0">{item.card ? <CardBody card={item.card} /> : <Pending item={item} />}</div>
           <Organization item={item} />
+          <SetImages images={item.images} />
           <SourceTexts item={item} />
           <Section title="Details" className="lg:hidden">
             <Provenance item={item} />
@@ -125,6 +257,10 @@ function Provenance({ item }: { item: ItemDetail }): JSX.Element | null {
   );
 }
 
+const ORIGINAL_CLASS =
+  "inline-flex items-center gap-1 text-[13px] text-silt hover:text-graphite max-[700px]:-my-3 max-[700px]:py-3";
+const IMAGES_ID = "images";
+
 function Instrument({ item }: { item: ItemDetail }): JSX.Element {
   const { threshold } = useStatus();
   const scored = item.relevance_score !== null;
@@ -132,15 +268,21 @@ function Instrument({ item }: { item: ItemDetail }): JSX.Element {
     <section className="surface surface-pad">
       <div className="flex items-center justify-between gap-3">
         <span className={cn("font-[560]", item.status === "failed" && "text-alarm")}>{item.state_label}</span>
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-[13px] text-silt hover:text-graphite max-[700px]:-my-3 max-[700px]:py-3"
-        >
-          Open original
-          <ArrowUpRight aria-hidden className="size-3.5" />
-        </a>
+        {item.images.length > 1 ? (
+          <button
+            type="button"
+            onClick={() => document.getElementById(IMAGES_ID)?.scrollIntoView({ behavior: "smooth" })}
+            className={cn(ORIGINAL_CLASS, "cursor-pointer")}
+          >
+            {item.images.length} images
+            <ArrowDown aria-hidden className="size-3.5" />
+          </button>
+        ) : (
+          <a href={item.url} target="_blank" rel="noopener noreferrer" className={ORIGINAL_CLASS}>
+            Open original
+            <ArrowUpRight aria-hidden className="size-3.5" />
+          </a>
+        )}
       </div>
       {scored ? (
         <>
@@ -154,13 +296,18 @@ function Instrument({ item }: { item: ItemDetail }): JSX.Element {
               Goal: <span className="text-graphite">{item.matched_goal_title}</span>
             </p>
           )}
+          <KeepReasonPanel key={item.id} item={item} />
         </>
       ) : (
-        <div className="mt-4">
-          <StageTrack item={item} />
-        </div>
+        item.stage !== null && (
+          <div className="mt-4">
+            <StageTrack item={item} />
+          </div>
+        )
       )}
       <ItemActions item={item} />
+      <WishlistToggle item={item} />
+      <DeletePost item={item} />
     </section>
   );
 }
@@ -169,10 +316,10 @@ function ItemActions({ item }: { item: ItemDetail }): JSX.Element | null {
   const act = useItemAction();
   const primary = primaryAction(item);
   const run = (action: UserAction) =>
-    act.mutate({ id: item.id, action }, { onSuccess: () => toast(ACTIONS[action].done) });
+    act.mutate({ id: item.id, action }, { onSuccess: () => toast(actionWords(action, item).done) });
 
   const onKey = useEffectEvent((event: KeyboardEvent) => {
-    if (event.metaKey || event.ctrlKey || event.altKey || isEditable(event.target) || act.isPending) return;
+    if (event.metaKey || event.ctrlKey || event.altKey || ignoresShortcut(event) || act.isPending) return;
     const action = KEYS[event.key.toLowerCase()];
     if (action && item.actions.includes(action)) run(action);
   });
@@ -196,7 +343,7 @@ function ItemActions({ item }: { item: ItemDetail }): JSX.Element | null {
             onClick={() => run(action)}
             className={cn(ordered.length % 2 === 1 && i === ordered.length - 1 && "col-span-2")}
           >
-            {ACTIONS[action].label}
+            {actionWords(action, item).label}
           </Button>
         ))}
       </div>
@@ -210,7 +357,7 @@ function ItemActions({ item }: { item: ItemDetail }): JSX.Element | null {
               onClick={() => run(action)}
               className="min-w-0 flex-1"
             >
-              {ACTIONS[action].label}
+              {actionWords(action, item).label}
             </Button>
           ))}
           {item.actions.includes("reprocess") && (
@@ -226,6 +373,56 @@ function ItemActions({ item }: { item: ItemDetail }): JSX.Element | null {
           )}
         </div>
       </DockPortal>
+    </>
+  );
+}
+
+function WishlistToggle({ item }: { item: ItemDetail }): JSX.Element | null {
+  const set = useSetWishlist();
+  if (!item.can_wishlist) return null;
+  const before = item.wishlist_override;
+  const toggle = (on: boolean) =>
+    set.mutate(
+      { id: item.id, on },
+      {
+        onSuccess: () =>
+          toast(on ? "Added to wishlist" : "Removed from wishlist", {
+            action: { label: "Undo", onClick: () => set.mutate({ id: item.id, on: before }) },
+          }),
+      },
+    );
+  return (
+    <Button
+      variant="ghost"
+      disabled={set.isPending}
+      onClick={() => toggle(!item.wishlist)}
+      className="mt-2 w-full max-[700px]:h-11"
+    >
+      <Gift aria-hidden />
+      {item.wishlist ? "Remove from wishlist" : "Add to wishlist"}
+    </Button>
+  );
+}
+
+function DeletePost({ item }: { item: ItemDetail }): JSX.Element | null {
+  const [confirming, setConfirming] = useState(false);
+  const navigate = useNavigate();
+  if (!item.can_delete) return null;
+  const close = (deleted: boolean) => {
+    setConfirming(false);
+    if (deleted) void navigate({ to: "/archived", replace: true });
+  };
+  return (
+    <>
+      <Button
+        variant="ghost"
+        onClick={() => setConfirming(true)}
+        className="mt-2 w-full text-alarm hover:text-alarm max-[700px]:h-11"
+      >
+        <Trash2 aria-hidden />
+        {DELETE_LABEL}
+      </Button>
+      <ConfirmDelete item={item} open={confirming} onClose={close} />
     </>
   );
 }
@@ -253,6 +450,32 @@ function Pending({ item }: { item: ItemDetail }): JSX.Element {
         <p className={cn("mb-1", item.status === "failed" ? "text-alarm" : "text-ink-soft")}>{item.status_reason}</p>
       )}
       <p className="text-silt">{body}</p>
+    </div>
+  );
+}
+
+function SetImages({ images }: { images: string[] }): JSX.Element | null {
+  if (images.length < 2) return null;
+  return (
+    <div id={IMAGES_ID} className="scroll-mt-6">
+      <Section title="Images, in reading order">
+        <ol aria-label="Images" className="grid grid-cols-5 gap-2 max-[700px]:grid-cols-3">
+          {images.map((url, i) => (
+            <li key={url}>
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Open image ${i + 1}`}
+                className="relative block aspect-[3/4] overflow-hidden rounded-lg border border-mesh bg-pan"
+              >
+                <img src={url} alt="" loading="lazy" draggable={false} className="size-full object-cover object-top" />
+                <ImageNumber n={i + 1} />
+              </a>
+            </li>
+          ))}
+        </ol>
+      </Section>
     </div>
   );
 }

@@ -1,11 +1,11 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createRoute, Link, Navigate, notFound, useParams, useSearch } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
 import { type CSSProperties, type JSX, useState } from "react";
 import { toast } from "sonner";
 import {
   ApiError,
   api,
+  type ItemStatus,
   type LabelCount,
   type MergeSuggestion,
   type Topic,
@@ -18,9 +18,9 @@ import {
 import { BriefBody, SourceLedger } from "@/components/brief";
 import { Section } from "@/components/card-body";
 import { ItemList } from "@/components/item-list";
-import { Empty, Page, PageHeader } from "@/components/page";
+import { BackLink, Empty, Page, PageHeader } from "@/components/page";
 import { ThresholdLine } from "@/components/score-rail";
-import { TopicSheet } from "@/components/topic-sheet";
+import { NewTopicSheet, TopicSheet } from "@/components/topic-sheet";
 import { Button, chipClass } from "@/components/ui/button";
 import { formatAgo } from "@/lib/format";
 import { parseId, parseTopicSearch } from "@/lib/search";
@@ -47,7 +47,7 @@ export const topicRoute = createRoute({
     try {
       return await Promise.all([
         context.queryClient.ensureQueryData(api.topic(params.topicId)),
-        context.queryClient.ensureQueryData(api.items({ view: "kept", topic: params.topicId, label: deps.label })),
+        context.queryClient.ensureQueryData(topicPosts(params.topicId, deps.label)),
       ]);
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) throw notFound();
@@ -72,6 +72,12 @@ function TopicsPage(): JSX.Element {
           </span>
         }
       />
+      <div className="flex gap-2 max-[700px]:[&>*]:flex-1">
+        <NewTopicSheet />
+        <Button asChild>
+          <Link to="/topics/rebuild">Rebuild topics</Link>
+        </Button>
+      </div>
       {data.suggestions.length > 0 && <Suggestions suggestions={data.suggestions} />}
       {count === 0 ? (
         <Empty title="No topics yet">
@@ -201,13 +207,7 @@ function TopicPage(): JSX.Element {
   }
   return (
     <Page>
-      <Link
-        to="/topics"
-        className="mb-[18px] inline-flex items-center gap-1 text-[13px] text-silt hover:text-graphite max-[700px]:-my-3 max-[700px]:mb-1.5 max-[700px]:py-3 max-[700px]:text-[15px]"
-      >
-        <ArrowLeft aria-hidden className="size-3.5" />
-        Topics
-      </Link>
+      <BackLink to="/topics">Topics</BackLink>
       <TopicHeader topic={topic} />
       <div className="mt-7">
         <BriefState topic={topic} />
@@ -275,8 +275,13 @@ const MAX_CHIPS = 8;
 
 const isShared = (l: LabelCount): boolean => l.count > 1;
 
+// Every member post, wishlist ones included, so the list matches the topic's counts.
+const TOPIC_MEMBERS: readonly ItemStatus[] = ["kept", "done"];
+
+const topicPosts = (topic: number, label?: string) => api.items({ status: TOPIC_MEMBERS, topic, label });
+
 function TopicPosts({ topic, label }: { topic: TopicDetail; label?: string }): JSX.Element {
-  const { data: items } = useSuspenseQuery(api.items({ view: "kept", topic: topic.id, label }));
+  const { data: items } = useSuspenseQuery(topicPosts(topic.id, label));
   const chips = topic.labels.filter((l) => isShared(l) || l.label === label).slice(0, MAX_CHIPS);
   return (
     <Section title="Posts" className="mt-10">

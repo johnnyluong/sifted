@@ -3,7 +3,7 @@ import type { Import, Item, ItemDetail, ItemMotion, Status, Topic, TopicDetail }
 export function status(overrides: { revision?: string; busy?: boolean; in_motion?: ItemMotion[] } = {}): Status {
   return {
     counts: {},
-    nav: { inbox: 1, kept: 4, archived: 9, topics: 2 },
+    nav: { inbox: 1, kept: 4, wishlist: 3, archived: 9, topics: 2 },
     llm: "fake",
     active_goals: 2,
     has_digest: false,
@@ -45,6 +45,10 @@ export function item(overrides: Partial<Item> = {}): Item {
     next_attempt_at: null,
     last_error: null,
     actions: ["archive", "done", "reprocess"],
+    can_delete: false,
+    wishlist: false,
+    wishlist_post: false,
+    product: null,
     in_motion: false,
     gist: "Adobada tacos worth the Chelsea Market line.",
     labels: ["tacos", "with friends"],
@@ -71,6 +75,11 @@ export function detail(overrides: Partial<ItemDetail> = {}): ItemDetail {
     processed_at: "2026-10-21T19:06:00Z",
     done_at: null,
     organization: null,
+    can_wishlist: true,
+    wishlist_override: null,
+    asks_keep_reason: false,
+    keep_reason: null,
+    images: [],
     ...overrides,
   };
 }
@@ -85,7 +94,6 @@ export function importView(overrides: Partial<Import> = {}): Import {
     files_read: ["your_instagram_activity/saved/saved_posts.json"],
     files_skipped_large: [],
     files_skipped_budget: [],
-    by_source: { instagram: 380, threads: 32 },
     unsupported_count: 5,
     unsupported_sample: ["https://www.instagram.com/stories/chef/1/"],
     counts: {

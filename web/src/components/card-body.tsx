@@ -2,7 +2,8 @@ import { ArrowUpRight } from "lucide-react";
 import type { JSX, ReactNode } from "react";
 import type { Card, CardOf } from "@/api";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Eyebrow } from "@/components/ui/eyebrow";
+import { cn, httpLink } from "@/lib/utils";
 
 export function CardBody({ card }: { card: Card }): JSX.Element | null {
   switch (card.item_type) {
@@ -40,7 +41,7 @@ export function Section({
 }): JSX.Element {
   return (
     <section className={cn("mt-7 first:mt-0", className)}>
-      <h2 className="mb-2 font-mono text-micro text-silt uppercase tracking-[0.04em]">{title}</h2>
+      <Eyebrow className="mb-2">{title}</Eyebrow>
       {children}
     </section>
   );
@@ -103,6 +104,21 @@ function OutLink({ href, children }: { href: string; children: ReactNode }): JSX
         <ArrowUpRight aria-hidden />
       </a>
     </Button>
+  );
+}
+
+export function ShopLink({ href, name, className }: { href: string; name: string; className?: string }): JSX.Element {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`Open the link for ${name}`}
+      className={cn("inline-flex items-center gap-1 text-[13px] text-silt hover:text-graphite", className)}
+    >
+      Shop
+      <ArrowUpRight aria-hidden className="size-3.5" />
+    </a>
   );
 }
 
@@ -234,7 +250,7 @@ function IdeaBody({ details: d }: Details<"idea">): JSX.Element {
 }
 
 function ProductBody({ details: d }: Details<"product">): JSX.Element {
-  const link = d.link && /^https?:\/\//i.test(d.link) ? d.link : null;
+  const link = httpLink(d.link);
   return (
     <>
       <Section title="Product">

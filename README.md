@@ -24,6 +24,8 @@ uv run sift run               # http://127.0.0.1:8000
 
 On first run, the app opens on setup. Answer a few questions, edit the goals and values Sift drafts from them, and save. Then add a reel or Threads link: paste it into the box on the Inbox, use **Add link** in the sidebar (the **Add** tab on a phone) from any page, or press Cmd+V anywhere outside a text field.
 
+When you keep a post Sift would have archived, its page asks why: the goal it serves, or none of them, and a note if you like. Sift scores new posts with your reasons in mind, and **Redo setup** on the Goals page drafts goals that cover them.
+
 To try the app without an API key, set `LLM_BACKEND=fake` in `.env`. Cards and scores then come from keyword rules instead of Claude, and a banner says so.
 
 With no key and no fake backend, links are still downloaded and transcribed. They wait in the Inbox as "Waiting for LLM" and finish on their own once you add a key and restart.
@@ -51,7 +53,7 @@ Instagram fetches are spaced `FETCH_DELAY_SECONDS` apart (default 20).
 
 ## Import what you saved before Sift
 
-Sift can bring in the posts you saved on Instagram and Threads before you started using it.
+Sift can bring in the posts you saved on Instagram before you started using it. Threads has no export of saved posts alone, so save Threads posts with the share sheet or by pasting the link.
 
 1. In Instagram, open **Accounts Center > Your information and permissions > Download your information**.
 2. Choose **Some of your information**, tick **Saved**, and pick format **JSON** and date range **All time**.
@@ -64,6 +66,12 @@ Sift reads only the files for saved posts (never likes, views or messages) and d
 The import pauses itself after 5 imported posts in a row fail to download. Run `uv run sift doctor`; if the account is fine, the posts were likely deleted, so resume. A post that is deleted or private fails at once instead of retrying. Archive it from its page to clear it from the Inbox.
 
 Settings: `IMPORT_GAP_SECONDS` (keep it at or above `FETCH_DELAY_SECONDS`), `IMPORT_DAILY_CAP`, and `IMPORT_MAX_BYTES` (the largest upload, default 2 GiB).
+
+## Screenshots and photos
+
+An image becomes a post the way a link does: Sift reads it, writes a card, scores it and files it into a topic. Use **Add image** next to the link field, paste an image with ⌘V outside a text field, drop images on the window, or share them from the iPhone with the shortcut on **Save from iPhone**. When you add two or more at once, Sift asks whether they are one post, read together in order like a carousel (up to 10 images), or one post each. The same image, or the same images in the same order, sent twice is a duplicate.
+
+Sift reads PNG, JPEG, WebP, GIF (the first frame) and HEIC, which it converts to JPEG with macOS `sips`. It keeps each image in `DATA_DIR/uploads/`, and **Open original** opens it; a post of several images lists them all on its page. `UPLOAD_MAX_BYTES` sets the largest image, default 25 MB.
 
 ## Topics and briefs
 

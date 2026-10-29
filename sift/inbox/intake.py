@@ -47,12 +47,16 @@ def submit(
             case Rejected() as rejected:
                 out.append(rejected)
             case SourceRef() as ref:
-                match store.enqueue(ref, url, origin, now, llm_ready=llm_ready):
-                    case store.Created(item=item):
-                        out.append(Queued(item))
-                    case store.Existing(item=item):
-                        out.append(Duplicate(item))
+                out.append(submit_ref(ref, url, origin, now, llm_ready=llm_ready))
     return out
+
+
+def submit_ref(ref: SourceRef, url: str, origin: Origin, now: datetime, *, llm_ready: bool) -> Queued | Duplicate:
+    match store.enqueue(ref, url, origin, now, llm_ready=llm_ready):
+        case store.Created(item=item):
+            return Queued(item)
+        case store.Existing(item=item):
+            return Duplicate(item)
 
 
 def _parse(url: str, resolve: Callable[[SourceRef], SourceRef]) -> SourceRef | Rejected:

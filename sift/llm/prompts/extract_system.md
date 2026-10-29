@@ -12,6 +12,7 @@ Rules:
   - idea: a creative or strategic idea worth remembering, not a step-by-step method
   - product: a specific product or tool to consider buying or using
   - other: anything else
+- wishlist (product cards only): true when the product is something the reader might buy for themselves: a physical product, clothing, gear, home goods, a ticketed or paid event, a paid app or course. False for free software, open-source repos, and services to research rather than buy.
 - title: short and specific, under 80 characters, no emoji.
 - summary: 2 to 3 plain sentences on what the post teaches or recommends.
 - next_action: one concrete thing the reader could do, such as "Book a table for Friday", "Try the hook formula on the next launch post". Null if nothing sensible.

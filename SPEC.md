@@ -16,7 +16,7 @@ I scroll Instagram and Threads and find useful things: restaurants and places to
 1. I define my goals and values once (personal, professional, entrepreneurial).
 2. I share an Instagram reel or Threads post link to a Telegram bot.
 3. Sift downloads the content, transcribes it, reads on-screen text, and extracts the core knowledge into a structured card (a place, a recipe, a step-by-step playbook, an idea).
-4. Sift scores the card against my goals. Relevant items are **Kept**, noise is **Archived** (never deleted).
+4. Sift scores the card against my goals. Relevant items are **Kept**, noise is **Archived** (you can delete them by hand from Archived).
 5. A weekly **digest** tells me what's worth acting on now, tied to my goals.
 6. A local web app lets me browse, search, override decisions, and mark things **Done**.
 

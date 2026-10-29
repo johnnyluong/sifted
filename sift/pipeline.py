@@ -17,7 +17,7 @@ from sift.items.views import ItemOutcome
 from sift.llm import guards
 from sift.llm.client import LLM
 from sift.llm.schemas import ExtractInput, ScoreInput
-from sift.media import Transcriber, process_media
+from sift.media import SCREENSHOT_LONG_EDGE, SLIDE_LONG_EDGE, Transcriber, process_media
 from sift.sources import Fetchers
 from sift.sources.base import FetchResult
 
@@ -85,7 +85,7 @@ def run(claim: Claim, deps: PipelineDeps) -> ItemOutcome | None:
                 case Stage.score:
                     return _score(claim, row, deps)
                 case None:
-                    raise AssertionError("claimed an item with nothing left to do")
+                    return store.record_wishlist(claim, deps.clock())
     except _Release:
         store.release(claim)
         return None
@@ -134,6 +134,7 @@ def _media(claim: Claim, row: WorkItem, deps: PipelineDeps) -> None:
         [p for p in map(deps.resolve, row.slide_paths) if p],
         deps.workdir(row.id),
         deps.transcriber,
+        SCREENSHOT_LONG_EDGE if row.source is Source.image else SLIDE_LONG_EDGE,
     )
     result = replace(result, frame_paths=[p for p in (deps.relative(f) for f in result.frame_paths) if p])
     delete = video is not None and not deps.keep_media

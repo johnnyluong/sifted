@@ -65,7 +65,11 @@ def rt(
     r = runtime.build_runtime(
         settings,
         Overrides(
-            fetchers=fake_fetchers(fetcher), transcriber=transcriber, llm=llm, use_llm_override=True, clock=clock
+            fetchers=fake_fetchers(settings.uploads_dir, fetcher),
+            transcriber=transcriber,
+            llm=llm,
+            use_llm_override=True,
+            clock=clock,
         ),
     )
     runtime.migrate(settings)

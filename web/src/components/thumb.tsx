@@ -16,7 +16,7 @@ export function Thumb({
 }): JSX.Element {
   const box = BOX[size];
   if (url) {
-    return <img src={url} alt="" loading="lazy" className={cn(box, "bg-pan object-cover")} />;
+    return <img src={url} alt="" loading="lazy" draggable={false} className={cn(box, "bg-pan object-cover")} />;
   }
   return (
     <span

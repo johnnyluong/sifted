@@ -83,7 +83,7 @@ async def test_list_filters_by_goal_type_and_text(client: TestClient, rt: Runtim
 
 def test_status_carries_the_frame(client: TestClient) -> None:
     body = client.get("/api/status").json()
-    assert body["nav"] == {"inbox": 0, "kept": 0, "archived": 0, "topics": 0}
+    assert body["nav"] == {"inbox": 0, "kept": 0, "wishlist": 0, "archived": 0, "topics": 0}
     assert body["notice"] == "fake_llm" and body["threshold"] == 60
     assert body["timezone"] == "America/New_York"
     assert body["digest_schedule"] == "Sundays at 6:00pm"
@@ -187,7 +187,10 @@ async def test_a_retry_waiting_on_backoff_is_not_busy(
 
 def test_notice_without_goals_on_a_real_backend(tmp_path: Path, clock: Clock) -> None:
     settings = Settings(_env_file=None, data_dir=tmp_path / "data", llm_backend="anthropic")  # pyright: ignore[reportCallIssue]
-    rt = build_runtime(settings, Overrides(fetchers=fake_fetchers(), llm=FakeLLM(), use_llm_override=True, clock=clock))
+    rt = build_runtime(
+        settings,
+        Overrides(fetchers=fake_fetchers(settings.uploads_dir), llm=FakeLLM(), use_llm_override=True, clock=clock),
+    )
     migrate(settings)
     assert services.notice(rt, active_goals=0) is services.Notice.no_goals
     assert services.notice(rt, active_goals=1) is None
@@ -224,14 +227,14 @@ def test_goals_and_values(client: TestClient) -> None:
 async def test_digest_conflict_then_created(client: TestClient, rt: Runtime, goal: int) -> None:
     conflict = client.post("/api/digests")
     assert conflict.status_code == 409 and "Nothing new to surface" in conflict.json()["detail"]
-    assert client.get("/api/digests").json() == {"latest": None, "earlier": []}
+    assert client.get("/api/digests").json() == {"latest": None, "earlier": [], "topics": []}
     item_id = _submit(client, "https://www.instagram.com/reel/ABC/")
     await rt.worker.run_item(item_id)
     before = client.get("/api/status").json()["pulse"]["revision"]
     created = client.post("/api/digests")
     assert created.status_code == 201 and created.json()["item_ids"] == [item_id]
     assert client.get(f"/api/digests/{created.json()['id']}").json() == created.json()
-    assert client.get("/api/digests").json() == {"latest": created.json(), "earlier": []}
+    assert client.get("/api/digests").json() == {"latest": created.json(), "earlier": [], "topics": []}
     assert client.get("/api/status").json()["pulse"]["revision"] != before
 
 

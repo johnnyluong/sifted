@@ -6,13 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from sift.domain import MediaKind
+from sift.domain import FailureKind, MediaKind, ProcessingError
 from sift.media import (
     MAX_FRAMES,
     MAX_IMAGES,
     SLIDE_LONG_EDGE,
     extract_frames,
     frame_timestamps,
+    image_size,
     probe,
     process_media,
     shrink_slides,
@@ -119,3 +120,25 @@ def test_video_frames_and_slides_share_one_image_cap(tmp_path: Path, monkeypatch
     result = process_media(MediaKind.video, tmp_path / "v.mp4", None, slides, tmp_path, transcriber=FakeTranscriber())
     assert len(result.frame_paths) == MAX_IMAGES
     assert result.frame_paths[:MAX_FRAMES] == frames
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+@pytest.mark.parametrize(("ext", "frames"), [("png", "1"), ("gif", "4")])
+def test_a_slide_of_any_format_becomes_one_jpeg_frame(tmp_path: Path, ext: str, frames: str) -> None:
+    slide = tmp_path / "slides" / f"slide_01.{ext}"
+    slide.parent.mkdir(parents=True)
+    source = ["-f", "lavfi", "-i", "testsrc=size=1500x900:rate=4", "-frames:v", frames]
+    subprocess.run(["ffmpeg", "-v", "error", *source, str(slide)], check=True)
+    [frame] = shrink_slides([slide], tmp_path / "frames")
+    assert frame.name == "slide_01.jpg" and frame.read_bytes().startswith(b"\xff\xd8\xff")
+    assert _size(frame) == f"{SLIDE_LONG_EDGE},614"
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_a_file_with_no_picture_has_no_image_size(tmp_path: Path) -> None:
+    sound = tmp_path / "sound.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=0.1", str(sound)], check=True)
+    with pytest.raises(ProcessingError) as e:
+        image_size(sound)
+    assert e.value.kind is FailureKind.unsupported_url and not e.value.retryable
+    assert e.value.message == "sound.wav holds no picture."

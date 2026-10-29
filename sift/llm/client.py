@@ -26,9 +26,14 @@ from sift.llm.schemas import (
     ScoreOutput,
     SetupDraft,
     SetupInput,
+    TopicFitDraft,
+    TopicFitInput,
     TopicPlanDraft,
     TopicPlanInput,
+    TopicRebuildDraft,
+    TopicRebuildInput,
 )
+from sift.media import ImageFormat, image_format
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +54,10 @@ class LLM(Protocol):
     def plan_topics(self, inp: TopicPlanInput) -> tuple[TopicPlanDraft, str]: ...
 
     def draft_setup(self, inp: SetupInput) -> tuple[SetupDraft, str]: ...
+
+    def rebuild_topics(self, inp: TopicRebuildInput) -> tuple[TopicRebuildDraft, str]: ...
+
+    def fit_topic(self, inp: TopicFitInput) -> tuple[TopicFitDraft, str]: ...
 
 
 def extract_prompt(inp: ExtractInput) -> str:
@@ -110,29 +119,38 @@ def setup_prompts(inp: SetupInput) -> tuple[str, str]:
     system = Prompt.setup_system.render(
         current_goals=[g.model_dump() for g in inp.current_goals], current_values=inp.current_values
     )
-    return system, Prompt.setup_user.render(answers=[a.model_dump() for a in inp.answers])
+    user = Prompt.setup_user.render(
+        answers=[a.model_dump() for a in inp.answers], kept_anyway=[k.model_dump() for k in inp.kept_anyway]
+    )
+    return system, user
 
 
-ImageType = Literal["image/jpeg", "image/png", "image/webp", "image/gif"]
+def rebuild_prompts(inp: TopicRebuildInput) -> tuple[str, str]:
+    system = Prompt.rebuild_system.render(goals=[g.model_dump() for g in inp.goals])
+    posts = json.dumps([p.model_dump(mode="json") for p in inp.posts], indent=1)
+    user = Prompt.rebuild_user.render(topics=[t.model_dump() for t in inp.topics], posts_json=posts)
+    return system, user
 
 
-def image_type(data: bytes) -> ImageType | None:
-    if data.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if data.startswith(b"\x89PNG"):
-        return "image/png"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    if data.startswith(b"GIF8"):
-        return "image/gif"
-    return None
+def fit_prompts(inp: TopicFitInput) -> tuple[str, str]:
+    posts = json.dumps([p.model_dump(mode="json") for p in inp.posts], indent=1)
+    user = Prompt.fit_user.render(topic=inp.topic, description=inp.description, posts_json=posts)
+    return Prompt.fit_system.render(), user
+
+
+_MEDIA_TYPES: dict[ImageFormat | None, Literal["image/jpeg", "image/png", "image/webp", "image/gif"]] = {
+    "jpg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+    "gif": "image/gif",
+}
 
 
 def _image_blocks(paths: list[Path]) -> list[ImageBlockParam | TextBlockParam]:
     blocks: list[ImageBlockParam | TextBlockParam] = []
     for path in paths:
         data = path.read_bytes() if path.is_file() else b""
-        if media_type := image_type(data):
+        if media_type := _MEDIA_TYPES.get(image_format(data)):
             encoded = base64.standard_b64encode(data).decode("ascii")
             blocks.append({"type": "image", "source": {"type": "base64", "media_type": media_type, "data": encoded}})
     return blocks
@@ -193,6 +211,16 @@ class AnthropicLLM:
     def draft_setup(self, inp: SetupInput) -> tuple[SetupDraft, str]:
         system, user = setup_prompts(inp)
         out = self._parse(self._digest_model, system, [{"type": "text", "text": user}], SetupDraft)
+        return out, self._digest_model
+
+    def rebuild_topics(self, inp: TopicRebuildInput) -> tuple[TopicRebuildDraft, str]:
+        system, user = rebuild_prompts(inp)
+        out = self._parse(self._digest_model, system, [{"type": "text", "text": user}], TopicRebuildDraft)
+        return out, self._digest_model
+
+    def fit_topic(self, inp: TopicFitInput) -> tuple[TopicFitDraft, str]:
+        system, user = fit_prompts(inp)
+        out = self._parse(self._digest_model, system, [{"type": "text", "text": user}], TopicFitDraft)
         return out, self._digest_model
 
     def _parse[T: BaseModel](

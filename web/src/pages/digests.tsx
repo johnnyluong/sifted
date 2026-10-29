@@ -1,23 +1,50 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createRoute, Link, notFound, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Check, ChevronRight } from "lucide-react";
+import { createRoute, Link, notFound, redirect, useParams, useSearch } from "@tanstack/react-router";
+import { Check, ChevronRight } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type JSX, useState } from "react";
-import { ApiError, api, type Digest, type DigestGroup, type DigestPick, useGenerateDigest, useStatus } from "@/api";
-import { Empty, Page, PageHeader } from "@/components/page";
+import {
+  ApiError,
+  api,
+  type Digest,
+  type DigestGroup,
+  type DigestLine,
+  type DigestPick,
+  type DigestsView,
+  type Item,
+  type TopicDigest,
+  type TopicDigestTab,
+  useGenerateDigest,
+  useStatus,
+} from "@/api";
+import { ShopLink } from "@/components/card-body";
+import { BackLink, Empty, Page, PageHeader } from "@/components/page";
 import { useMoveItem } from "@/components/shelf";
 import { Thumb } from "@/components/thumb";
-import { Button } from "@/components/ui/button";
+import { Button, chipClass } from "@/components/ui/button";
+import { Eyebrow } from "@/components/ui/eyebrow";
 import { formatDay, formatMoment } from "@/lib/format";
-import { parseId } from "@/lib/search";
-import { cn } from "@/lib/utils";
-import { SOURCES } from "@/lib/vocabulary";
+import { parseDigestSearch, parseId } from "@/lib/search";
+import { cn, httpLink } from "@/lib/utils";
+import { actionWords, SOURCES } from "@/lib/vocabulary";
 import { rootRoute } from "./root";
 
 export const digestsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/digests",
-  loader: ({ context }) => context.queryClient.ensureQueryData(api.digests),
+  validateSearch: parseDigestSearch,
+  loaderDeps: ({ search }) => search,
+  loader: async ({ context, deps }) => {
+    try {
+      return await Promise.all([
+        context.queryClient.ensureQueryData(api.digests),
+        deps.topic === undefined ? null : context.queryClient.ensureQueryData(api.topicDigest(deps.topic)),
+      ]);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) throw redirect({ to: "/digests", search: {} });
+      throw error;
+    }
+  },
   component: DigestsPage,
 });
 
@@ -40,9 +67,12 @@ export const digestRoute = createRoute({
 });
 
 function DigestsPage(): JSX.Element {
-  const {
-    data: { latest, earlier },
-  } = useSuspenseQuery(api.digests);
+  const { topic } = useSearch({ from: "/digests" });
+  const { data } = useSuspenseQuery(api.digests);
+  return topic === undefined ? <ThisWeek view={data} /> : <TopicTab topicId={topic} tabs={data.topics} />;
+}
+
+function ThisWeek({ view: { latest, earlier, topics } }: { view: DigestsView }): JSX.Element {
   const { digest_schedule, timezone } = useStatus();
   const generate = useGenerateDigest();
   return (
@@ -56,6 +86,7 @@ function DigestsPage(): JSX.Element {
         }
         aside={<GenerateButton generate={generate} />}
       />
+      <DigestTabs tabs={topics} />
       <GenerateError generate={generate} className="mb-5 max-[700px]:hidden" />
       {latest ? (
         <DigestBody digest={latest} />
@@ -70,7 +101,7 @@ function DigestsPage(): JSX.Element {
       </div>
       {earlier.length > 0 && (
         <section className="mt-10">
-          <h2 className={labelClass}>Earlier digests</h2>
+          <Eyebrow className="mb-2.5">Earlier digests</Eyebrow>
           <ul className="surface">
             {earlier.map((d) => (
               <li key={d.id} className="border-mesh border-t first:border-t-0">
@@ -96,6 +127,87 @@ function DigestsPage(): JSX.Element {
         </section>
       )}
     </Page>
+  );
+}
+
+function TopicTab({ topicId, tabs }: { topicId: number; tabs: TopicDigestTab[] }): JSX.Element {
+  const { data: view } = useSuspenseQuery(api.topicDigest(topicId));
+  return (
+    <Page>
+      <PageHeader title="Digest" subtitle="What to act on next in one topic, from what you kept." />
+      <DigestTabs tabs={tabs} active={view.topic.id} />
+      <TopicDigestBody view={view} />
+    </Page>
+  );
+}
+
+function DigestTabs({ tabs, active }: { tabs: TopicDigestTab[]; active?: number }): JSX.Element | null {
+  if (tabs.length === 0 && active === undefined) return null;
+  const tab = (current: boolean) => cn(chipClass(current), "shrink-0 whitespace-nowrap");
+  return (
+    <nav aria-label="Digest tabs" className="mb-6 flex gap-2 overflow-x-auto py-1.5 [scrollbar-width:none]">
+      <Link
+        to="/digests"
+        search={{}}
+        activeOptions={{ exact: true }}
+        aria-current={active === undefined ? "page" : undefined}
+        className={tab(active === undefined)}
+      >
+        This week
+      </Link>
+      {tabs.map(({ topic, open }) => (
+        <Link
+          key={topic.id}
+          to="/digests"
+          search={{ topic: topic.id }}
+          activeOptions={{ exact: true }}
+          aria-current={active === topic.id ? "page" : undefined}
+          className={tab(active === topic.id)}
+        >
+          {topic.name} <span className="font-mono text-micro text-silt">{open}</span>
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+function TopicDigestBody({ view }: { view: TopicDigest }): JSX.Element {
+  return (
+    <div className="max-w-[68ch]">
+      <h2 className="font-display font-[640] text-heading">{view.topic.name}</h2>
+      {view.overview && <p className="mt-1.5 text-reading">{view.overview}</p>}
+      <Link
+        to="/topics/$topicId"
+        params={{ topicId: view.topic.id }}
+        className="mt-2 inline-flex items-center gap-1 text-[13px] text-silt hover:text-graphite"
+      >
+        Open topic <ChevronRight aria-hidden className="size-3.5" />
+      </Link>
+      <section aria-labelledby="topic-next" className="mt-7">
+        <Eyebrow id="topic-next" className="mb-2.5">
+          To act on next
+        </Eyebrow>
+        {view.next.length > 0 ? (
+          <ol className="space-y-3">
+            <AnimatePresence initial={false} mode="popLayout">
+              {view.next.map((pick, i) => (
+                <PickCard key={pick.item.id} pick={pick} rank={i + 1} />
+              ))}
+            </AnimatePresence>
+          </ol>
+        ) : (
+          <Empty title="Nothing to act on">
+            Nothing kept here is waiting on you right now. A post you keep on this topic shows up here.
+          </Empty>
+        )}
+      </section>
+      {view.new.length > 0 && (
+        <section className="mt-8">
+          <Eyebrow className="mb-2.5">Also new</Eyebrow>
+          <Lines lines={view.new} />
+        </section>
+      )}
+    </div>
   );
 }
 
@@ -129,13 +241,7 @@ function DigestPage(): JSX.Element {
   const { timezone } = useStatus();
   return (
     <Page>
-      <Link
-        to="/digests"
-        className="mb-[18px] inline-flex items-center gap-1 text-[13px] text-silt hover:text-graphite max-[700px]:-my-3 max-[700px]:mb-1.5 max-[700px]:py-3 max-[700px]:text-[15px]"
-      >
-        <ArrowLeft aria-hidden className="size-3.5" />
-        Digest
-      </Link>
+      <BackLink to="/digests">Digest</BackLink>
       <p className="font-mono text-micro text-silt">
         {formatDay(digest.period_start, timezone)} to {formatDay(digest.period_end, timezone)}
       </p>
@@ -147,8 +253,6 @@ function DigestPage(): JSX.Element {
   );
 }
 
-const labelClass = "mb-2.5 font-mono text-micro text-silt uppercase tracking-[0.04em]";
-
 export function DigestBody({ digest }: { digest: Digest }): JSX.Element {
   const byGoal = digest.groups.filter((g) => g.kind === "goal");
   const places = digest.groups.filter((g) => g.kind === "places");
@@ -156,9 +260,9 @@ export function DigestBody({ digest }: { digest: Digest }): JSX.Element {
     <div className="max-w-[68ch]">
       {digest.opening && <p className="mb-7 text-reading">{digest.opening}</p>}
       <section aria-labelledby="digest-top">
-        <h2 id="digest-top" className={labelClass}>
+        <Eyebrow id="digest-top" className="mb-2.5">
           To act on this week
-        </h2>
+        </Eyebrow>
         {digest.top.length > 0 ? (
           <ol className="space-y-3">
             <AnimatePresence initial={false} mode="popLayout">
@@ -173,7 +277,7 @@ export function DigestBody({ digest }: { digest: Digest }): JSX.Element {
       </section>
       {digest.done.length > 0 && (
         <section className="mt-8">
-          <h2 className={labelClass}>Done</h2>
+          <Eyebrow className="mb-2.5">Done</Eyebrow>
           <ul className="surface">
             {digest.done.map((pick) => (
               <DoneRow key={pick.item.id} pick={pick} />
@@ -183,7 +287,46 @@ export function DigestBody({ digest }: { digest: Digest }): JSX.Element {
       )}
       <Groups title="By goal" groups={byGoal} />
       <Groups title="Places" groups={places} />
+      {digest.wishlist.length > 0 && (
+        <section aria-labelledby="digest-wishlist" className="mt-8">
+          <Eyebrow id="digest-wishlist" className="mb-2.5">
+            On your wishlist
+          </Eyebrow>
+          <ul className="surface">
+            {digest.wishlist.map((item) => (
+              <WishRow key={item.id} item={item} />
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
+  );
+}
+
+function WishRow({ item }: { item: Item }): JSX.Element {
+  const move = useMoveItem();
+  const name = item.product?.name ?? item.display_title;
+  const link = httpLink(item.product?.link);
+  const bought = actionWords("done", item).label;
+  return (
+    <li className="flex items-center gap-3 border-mesh border-t px-4 py-2.5 first:border-t-0">
+      <Link
+        to="/items/$itemId"
+        params={{ itemId: item.id }}
+        className="min-w-0 flex-1 truncate font-medium hover:underline"
+      >
+        {name}
+      </Link>
+      {item.product?.price && (
+        <span className="shrink-0 font-mono text-caption text-graphite">{item.product.price}</span>
+      )}
+      {link && <ShopLink href={link} name={name} className="shrink-0" />}
+      {item.actions.includes("done") && (
+        <Button size="sm" onClick={() => move(item, "done")} aria-label={`${bought}: ${name}`}>
+          {bought}
+        </Button>
+      )}
+    </li>
   );
 }
 
@@ -275,28 +418,34 @@ function Groups({ title, groups }: { title: string; groups: DigestGroup[] }): JS
   if (groups.length === 0) return null;
   return (
     <section className="mt-8">
-      <h2 className={labelClass}>{title}</h2>
+      <Eyebrow className="mb-2.5">{title}</Eyebrow>
       <div className="space-y-5">
         {groups.map((g) => (
           <div key={g.heading}>
             <h3 className="mb-1.5 font-display font-[640] text-[16px] leading-[22px]">{g.heading}</h3>
-            <ul className="space-y-1.5">
-              {g.lines.map(({ item, line }) => (
-                <li key={item.id}>
-                  <Link
-                    to="/items/$itemId"
-                    params={{ itemId: item.id }}
-                    className="font-medium underline decoration-dust underline-offset-[3px] hover:decoration-graphite"
-                  >
-                    {item.display_title}
-                  </Link>
-                  {line && <span className="text-ink-soft">: {line}</span>}
-                </li>
-              ))}
-            </ul>
+            <Lines lines={g.lines} />
           </div>
         ))}
       </div>
     </section>
+  );
+}
+
+function Lines({ lines }: { lines: DigestLine[] }): JSX.Element {
+  return (
+    <ul className="space-y-1.5">
+      {lines.map(({ item, line }) => (
+        <li key={item.id}>
+          <Link
+            to="/items/$itemId"
+            params={{ itemId: item.id }}
+            className="font-medium underline decoration-dust underline-offset-[3px] hover:decoration-graphite"
+          >
+            {item.display_title}
+          </Link>
+          {line && <span className="text-ink-soft">: {line}</span>}
+        </li>
+      ))}
+    </ul>
   );
 }

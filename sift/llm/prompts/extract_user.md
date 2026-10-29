@@ -1,5 +1,6 @@
 Source: {{ source }}
-{% if notes %}Notes: {{ notes | join(" ") }}
+{% if source == "image" %}This is a screenshot or photo the person saved themselves, with no caption and no author. Read every word in it.
+{% endif %}{% if notes %}Notes: {{ notes | join(" ") }}
 {% endif %}
 <author>{{ author_handle or "unknown" }}</author>
 

@@ -10,6 +10,7 @@ describe("inMore", () => {
     expect(inMore("/share")).toBe(true);
     expect(inMore("/topics")).toBe(true);
     expect(inMore("/topics/3")).toBe(true);
+    expect(inMore("/roadmap")).toBe(true);
     expect(inMore("/digests")).toBe(false);
     expect(inMore("/inbox")).toBe(false);
     expect(inMore("/items/4")).toBe(false);

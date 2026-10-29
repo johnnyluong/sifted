@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import shutil
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from enum import StrEnum
 from hashlib import blake2b
@@ -21,6 +22,7 @@ from sift.items.lifecycle import UserAction
 from sift.items.views import ItemDetail, ItemSummary
 from sift.organize import store as organize
 from sift.runtime import Runtime
+from sift.sources import image
 
 _WRITE_BLOCK = 1024 * 1024
 
@@ -35,7 +37,8 @@ class Notice(StrEnum):
 
 class NavCounts(BaseModel):
     inbox: int
-    kept: int
+    kept: int = Field(description="Kept and done posts, leaving out kept posts on the wishlist.")
+    wishlist: int = Field(description="Kept posts on the wishlist.")
     archived: int
     topics: int = Field(description="Topics with at least one kept post.")
 
@@ -134,6 +137,49 @@ async def act(request: Request, item_id: int, action: UserAction) -> ItemDetail:
     return detail
 
 
+async def delete_item(request: Request, item_id: int) -> None:
+    runtime = rt(request)
+    try:
+        uploads = await run_in_threadpool(store.delete_archived, item_id)
+    except store.ItemNotFound as e:
+        raise HTTPException(404, "Item not found") from e
+    except store.InvalidTransition as e:
+        raise HTTPException(409, str(e)) from e
+    workdir = runtime.worker.deps.workdir(item_id)
+    await run_in_threadpool(_remove_files, workdir, runtime.settings.uploads_dir, uploads)
+
+
+def _remove_files(workdir: Path, uploads_dir: Path, uploads: list[str]) -> None:
+    shutil.rmtree(workdir, ignore_errors=True)
+    for name in uploads:
+        if (path := image.stored_file(uploads_dir, name)) is not None:
+            path.unlink(missing_ok=True)
+
+
+async def set_wishlist(request: Request, item_id: int, on: bool | None) -> ItemDetail:
+    runtime = rt(request)
+    try:
+        return await run_in_threadpool(store.set_wishlist, item_id, on, runtime.clock(), llm_ready=runtime.llm_ready)
+    except store.ItemNotFound as e:
+        raise HTTPException(404, "Item not found") from e
+    except store.InvalidTransition as e:
+        raise HTTPException(409, str(e)) from e
+
+
+async def set_keep_reason(request: Request, item_id: int, goal_id: int | None, note: str) -> ItemDetail:
+    runtime = rt(request)
+    try:
+        return await run_in_threadpool(
+            store.set_keep_reason, item_id, goal_id, note, runtime.clock(), llm_ready=runtime.llm_ready
+        )
+    except store.ItemNotFound as e:
+        raise HTTPException(404, "Item not found") from e
+    except goals.GoalNotFound as e:
+        raise HTTPException(404, "Goal not found") from e
+    except store.InvalidTransition as e:
+        raise HTTPException(409, str(e)) from e
+
+
 async def apply_setup(request: Request, body: goals.SetupApply) -> list[goals.GoalView]:
     runtime = rt(request)
     try:
@@ -159,24 +205,65 @@ async def organize_write[T](request: Request, fn: Callable[..., T], *args: objec
     return result
 
 
-async def upload_import(request: Request, filename: str) -> ImportView:
-    runtime = rt(request)
-    cap = runtime.settings.import_max_bytes
-    too_big = f"The export is larger than IMPORT_MAX_BYTES ({cap:,} bytes)."
+async def _capped_body(request: Request, cap: int, too_big: str) -> AsyncIterator[bytes]:
     declared = request.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > cap:
         raise HTTPException(413, too_big)
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > cap:
+            raise HTTPException(413, too_big)
+        yield chunk
+
+
+async def store_image(request: Request) -> str:
+    runtime = rt(request)
+    cap = runtime.settings.upload_max_bytes
+    data = bytearray()
+    async for chunk in _capped_body(request, cap, f"The image is larger than UPLOAD_MAX_BYTES ({cap:,} bytes)."):
+        data += chunk
+    try:
+        return await run_in_threadpool(image.store, bytes(data), runtime.settings.uploads_dir)
+    except image.NotAnImage as e:
+        raise HTTPException(415, str(e)) from e
+
+
+async def upload_image(request: Request, channel: Channel) -> list[SubmissionView]:
+    return [await _submit_images(request, [await store_image(request)], channel)]
+
+
+async def submit_image_set(request: Request, names: list[str], channel: Channel) -> list[SubmissionView]:
+    folder = rt(request).settings.uploads_dir
+    missing = await run_in_threadpool(lambda: [name for name in names if image.stored_file(folder, name) is None])
+    if missing:
+        raise HTTPException(422, f"{missing[0]} is not stored. Send it to POST /api/uploads/files first.")
+    return [await _submit_images(request, names, channel)]
+
+
+async def _submit_images(request: Request, names: list[str], channel: Channel) -> SubmissionView:
+    runtime = rt(request)
+    ref = image.upload_ref(names)
+    result = await run_in_threadpool(
+        intake.submit_ref, ref, ref.clean_url, Origin(channel), runtime.clock(), llm_ready=runtime.llm_ready
+    )
+    if isinstance(result, intake.Queued):
+        runtime.worker.wake()
+    return _submission(result)
+
+
+async def upload_import(request: Request, filename: str) -> ImportView:
+    runtime = rt(request)
+    cap = runtime.settings.import_max_bytes
     folder = runtime.settings.imports_dir
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{uuid.uuid4().hex}.zip"
     try:
-        size = 0
         block = bytearray()
         with path.open("wb") as f:
-            async for chunk in request.stream():
-                size += len(chunk)
-                if size > cap:
-                    raise HTTPException(413, too_big)
+            async for chunk in _capped_body(
+                request, cap, f"The export is larger than IMPORT_MAX_BYTES ({cap:,} bytes)."
+            ):
                 block += chunk
                 if len(block) >= _WRITE_BLOCK:
                     await run_in_threadpool(f.write, block)
@@ -215,13 +302,14 @@ async def generate_digest(request: Request) -> digest.DigestView | None:
 def status(runtime: Runtime) -> StatusView:
     settings = runtime.settings
     activity = queries.activity(llm_ready=runtime.llm_ready)
-    c = activity.counts
+    shelves = activity.shelves
     return StatusView(
-        counts=c,
+        counts=activity.counts,
         nav=NavCounts(
-            inbox=sum(c[s] for s in queries.INBOX),
-            kept=sum(c[s] for s in queries.KEPT),
-            archived=sum(c[s] for s in queries.ARCHIVED),
+            inbox=shelves[queries.Shelf.inbox],
+            kept=shelves[queries.Shelf.kept],
+            wishlist=shelves[queries.Shelf.wishlist],
+            archived=shelves[queries.Shelf.archived],
             topics=activity.organize.topics,
         ),
         llm="fake" if settings.llm_backend == "fake" else ("anthropic" if runtime.llm else None),
@@ -254,6 +342,7 @@ def notice(runtime: Runtime, active_goals: int) -> Notice | None:
 def pulse(act: queries.Activity, now: datetime, *, llm_ready: bool) -> Pulse:
     basis = (
         sorted(act.counts.items()),
+        sorted(act.shelves.items()),
         [(i.id, i.state_label, i.next_attempt_at, i.last_error) for i in act.moving],
         act.last_interaction_at,
         act.last_digest_at,
@@ -302,6 +391,10 @@ def _days_in_words(dow: str) -> str | None:
         return None
     days = [_DAYS[n] for n in names]
     return days[0] if len(days) == 1 else f"{', '.join(days[:-1])} and {days[-1]}"
+
+
+def upload_file(runtime: Runtime, name: str) -> Path | None:
+    return image.stored_file(runtime.settings.uploads_dir, name)
 
 
 def thumbnail_file(runtime: Runtime, item_id: int) -> Path | None:

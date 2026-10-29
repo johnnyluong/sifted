@@ -15,7 +15,8 @@ import { createPortal } from "react-dom";
 import type { NavCounts } from "@/api";
 import { AddLinkSheet } from "@/components/paste-box";
 import { ShelfLink, tabClass } from "@/components/shelf";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { ThemePicker } from "@/components/theme-picker";
+import { Eyebrow } from "@/components/ui/eyebrow";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { DIGEST, inMore, MORE, SHELVES } from "@/lib/nav";
 import { DOCK_HEIGHT_VAR } from "@/lib/viewport";
@@ -144,10 +145,10 @@ function MoreSheet({
             </li>
           ))}
         </ul>
-        <div className="mt-3 flex items-center justify-between px-1">
-          <span className="text-[13px] text-silt">Appearance</span>
-          <ThemeToggle className="min-h-11 px-3 text-[13px]" />
-        </div>
+        <Eyebrow as="p" className="mt-5 mb-2">
+          Appearance
+        </Eyebrow>
+        <ThemePicker />
       </SheetContent>
     </Sheet>
   );

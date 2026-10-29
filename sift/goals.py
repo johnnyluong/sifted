@@ -5,13 +5,14 @@ from enum import StrEnum
 from typing import Annotated, Any
 
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints
-from sqlmodel import col, select
+from sqlmodel import Session, col, func, select
 
 from sift import db
-from sift.domain import GoalCategory
+from sift.domain import Decision, GoalCategory
+from sift.items.views import KeepReason, display_title, keep_reason_of, keep_reason_text
 from sift.llm.client import LLM
-from sift.llm.schemas import GoalBrief, ProposedGoal, SetupAnswerIn, SetupDraft, SetupInput
-from sift.models import PROFILE_ID, Goal, Profile
+from sift.llm.schemas import GoalBrief, KeptAnyway, ProposedGoal, SetupAnswerIn, SetupDraft, SetupInput
+from sift.models import PROFILE_ID, Goal, Item, Profile
 
 GoalTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 GoalDescription = Annotated[str, StringConstraints(strip_whitespace=True, max_length=600)]
@@ -248,10 +249,44 @@ class SetupApply(SetupPlan):
     answers: SetupAnswers
 
 
+KEPT_SHOWN = 20
+_KEPT_WITH_REASON = (
+    col(Item.keep_reason_at).is_not(None),
+    Item.user_override == Decision.keep,
+    Item.threshold_decision == Decision.archive,
+)
+
+
+class KeptReason(BaseModel):
+    item_id: int
+    title: str
+    reason: KeepReason
+
+
+def _kept_reasons(s: Session) -> list[KeptReason]:
+    rows = s.exec(
+        select(Item).where(*_KEPT_WITH_REASON).order_by(col(Item.keep_reason_at).desc()).limit(KEPT_SHOWN)
+    ).all()
+    ids = {r.keep_goal_id for r in rows if r.keep_goal_id is not None}
+    titles = dict(s.exec(select(Goal.id, Goal.title).where(col(Goal.id).in_(ids))).all()) if ids else {}
+    return [
+        KeptReason(item_id=r.id, title=display_title(r.title, r.author_handle, r.source), reason=reason)
+        for r in rows
+        if r.id is not None and (reason := keep_reason_of(r, titles.get(r.keep_goal_id or 0)))
+    ]
+
+
+def _kept_since(s: Session, since: datetime | None) -> int:
+    after = () if since is None else (col(Item.keep_reason_at) > since,)
+    return s.exec(select(func.count()).select_from(Item).where(*_KEPT_WITH_REASON, *after)).one()
+
+
 class SetupView(BaseModel):
     questions: list[SetupQuestion]
     answers: list[SetupAnswer] = Field(description="The answers from the last setup you saved; empty before the first.")
     setup_at: datetime | None
+    kept_anyway: list[KeptReason] = Field(description=f"The {KEPT_SHOWN} latest posts you kept with a reason.")
+    kept_since_setup: int = Field(description="How many reasons you gave since setup_at, or ever before a setup.")
 
 
 class SetupConflict(Exception):
@@ -261,10 +296,14 @@ class SetupConflict(Exception):
 def setup_view() -> SetupView:
     with db.read_session() as s:
         row = s.get(Profile, PROFILE_ID)
+        setup_at = row.setup_at if row else None
+        kept, since = _kept_reasons(s), _kept_since(s, setup_at)
     return SetupView(
         questions=list(QUESTIONS),
         answers=_answers_still_valid(row.setup_answers if row else None),
-        setup_at=row.setup_at if row else None,
+        setup_at=setup_at,
+        kept_anyway=kept,
+        kept_since_setup=since,
     )
 
 
@@ -277,7 +316,14 @@ def _answers_still_valid(raw: list[dict[str, Any]] | None) -> list[SetupAnswer]:
 
 def draft_setup(answers: list[SetupAnswer], llm: LLM) -> SetupPlan:
     values, active = scoring_context()
-    draft, _ = llm.draft_setup(SetupInput(answers=_answered(answers), current_goals=active, current_values=values))
+    with db.read_session() as s:
+        kept = [
+            KeptAnyway(title=k.title, reason=keep_reason_text(k.reason.goal_title, k.reason.note))
+            for k in _kept_reasons(s)
+        ]
+    draft, _ = llm.draft_setup(
+        SetupInput(answers=_answered(answers), current_goals=active, current_values=values, kept_anyway=kept)
+    )
     return normalize_setup(draft, active)
 
 

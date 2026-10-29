@@ -17,10 +17,11 @@ from sift import db, goals
 from sift.domain import SHOWN_ROLES, DigestRole, ItemStatus, ItemType
 from sift.items import queries
 from sift.items.queries import DigestCandidate, ItemFilter
-from sift.items.views import ItemSummary
+from sift.items.views import ItemSummary, TopicRef
 from sift.llm.client import LLM
 from sift.llm.schemas import DigestDraft, DigestInput, DigestItemBrief
 from sift.models import Digest, DigestEntry
+from sift.organize import store as organize
 
 if TYPE_CHECKING:
     from sift.inbox.notify import Notifier
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 REPEAT_LIMIT = 3
 TOP_PICKS = 3
 CARRYOVER_POOL = 10
+WISHLIST_PICKS = 2
 OTHER = "Other"
 ELSEWHERE = "Elsewhere"
 
@@ -71,6 +73,10 @@ class DigestView(BaseModel):
     groups: list[DigestGroup] = Field(
         description="The digest's other new posts still kept, by goal and then by place. Done posts are under `done`."
     )
+    wishlist: list[ItemSummary] = Field(
+        description="Up to 2 kept posts on your wishlist, chosen by code: never shown first, then the longest since "
+        "shown. One bought or taken off the wishlist drops out."
+    )
     item_ids: list[int] = Field(description="The posts the digest showed when it was written, in its order.")
 
 
@@ -82,9 +88,25 @@ class DigestHeader(BaseModel):
     shown: int = Field(description="Posts the digest showed when it was written.")
 
 
+class TopicDigestTab(BaseModel):
+    topic: TopicRef
+    open: int = Field(description="Posts on the topic still kept, not done.")
+
+
+class TopicDigestView(BaseModel):
+    topic: TopicRef
+    overview: str = Field(description="The brief's overview, else the topic's description.")
+    next: list[DigestPick] = Field(
+        description="Up to 3 kept posts on the topic to act on, highest score first; a post not yet in a digest "
+        "wins a tie."
+    )
+    new: list[DigestLine] = Field(description="The topic's other new kept posts, new as the weekly digest counts it.")
+
+
 class DigestsView(BaseModel):
     latest: DigestView | None
     earlier: list[DigestHeader]
+    topics: list[TopicDigestTab] = Field(description="Topics with a kept post, the most kept first.")
 
 
 class DigestUnavailable(Exception):
@@ -101,6 +123,10 @@ class Selection:
         return not self.new and not self.carryover
 
 
+def by_score(c: DigestCandidate) -> tuple[bool, int]:
+    return c.relevance_score is None, -(c.relevance_score or 0)
+
+
 def select_items(cands: list[DigestCandidate], last_digest_at: datetime | None) -> Selection:
     eligible = [c for c in cands if c.times_surfaced_since_interaction < REPEAT_LIMIT]
     ids = {c.id for c in eligible}
@@ -111,8 +137,8 @@ def select_items(cands: list[DigestCandidate], last_digest_at: datetime | None) 
             return True
         return last_digest_at is not None and c.decided_at is not None and c.decided_at > last_digest_at
 
-    new = sorted((c for c in eligible if is_new(c)), key=lambda c: -c.relevance_score)
-    rest = sorted((c for c in eligible if not is_new(c)), key=lambda c: -c.relevance_score)
+    new = sorted((c for c in eligible if is_new(c)), key=by_score)
+    rest = sorted((c for c in eligible if not is_new(c)), key=by_score)
     return Selection(new=new, carryover=rest[:CARRYOVER_POOL])
 
 
@@ -140,7 +166,7 @@ def plan(sel: Selection, draft: DigestDraft) -> Plan:
             why, action = p.why.strip() or c.relevance_reason, p.next_action.strip() or c.next_action
             picks[c.id] = QueueEntry(c.id, DigestRole.pick, why, action, None)
     if not picks:
-        for c in sorted(by_id.values(), key=lambda c: -c.relevance_score)[:TOP_PICKS]:
+        for c in sorted(by_id.values(), key=by_score)[:TOP_PICKS]:
             picks[c.id] = QueueEntry(c.id, DigestRole.pick, c.relevance_reason, c.next_action, None)
     lines = {g.item_id: g.line.strip() for g in draft.by_goal}
     new = [
@@ -160,6 +186,7 @@ class Layout(NamedTuple):
     top: list[DigestPick]
     done: list[DigestPick]
     groups: list[DigestGroup]
+    wishlist: list[ItemSummary]
 
 
 def _top_and_done(
@@ -170,7 +197,7 @@ def _top_and_done(
     for e in queue:
         item = items.get(e.item_id)
         room = len(top) < TOP_PICKS
-        if item is None:
+        if item is None or e.role is DigestRole.wishlist:
             continue
         if item.status is ItemStatus.kept and room:
             into = top
@@ -206,7 +233,15 @@ def layout(queue: Sequence[QueueEntry], items: Mapping[int, ItemSummary], areas:
             for h in sorted(by_area, key=lambda h: (h == ELSEWHERE, h))
         ),
     ]
-    return Layout(top, done, groups)
+    wishlist = [
+        item
+        for e in queue
+        if e.role is DigestRole.wishlist
+        and (item := items.get(e.item_id)) is not None
+        and item.status is ItemStatus.kept
+        and item.wishlist
+    ]
+    return Layout(top, done, groups, wishlist)
 
 
 def _latest() -> Digest | None:
@@ -221,6 +256,9 @@ def compose(now: datetime, llm: LLM | None) -> DigestView | None:
         return None
     if llm is None:
         raise DigestUnavailable("Set ANTHROPIC_API_KEY (or LLM_BACKEND=fake) to generate digests.")
+    # An item in both the queue and the rotation would break digest_entries' primary key.
+    queued = [c.id for c in (*sel.new, *sel.carryover)]
+    rotation = queries.wishlist_rotation(WISHLIST_PICKS, exclude=queued)
     values, active = goals.scoring_context()
     groups: tuple[tuple[Literal["new", "carryover"], list[DigestCandidate]], ...] = (
         ("new", sel.new),
@@ -242,6 +280,7 @@ def compose(now: datetime, llm: LLM | None) -> DigestView | None:
     ]
     draft, model = llm.compose_digest(DigestInput(values_text=values, goals=active, items=briefs))
     queue = plan(sel, draft)
+    wishlist = [QueueEntry(i, DigestRole.wishlist, None, None, None) for i in rotation]
     start = (
         last.created_at
         if last
@@ -253,7 +292,7 @@ def compose(now: datetime, llm: LLM | None) -> DigestView | None:
         s.flush()
         assert row.id is not None
         digest_id = row.id
-        for position, e in enumerate(queue.queue, 1):
+        for position, e in enumerate((*queue.queue, *wishlist), 1):
             s.add(
                 DigestEntry(
                     digest_id=digest_id,
@@ -319,7 +358,7 @@ def get_digest(digest_id: int, *, llm_ready: bool) -> DigestView | None:
     queue = [QueueEntry(e.item_id, e.role, e.why, e.next_action, e.line) for e in entries]
     ids = frozenset(e.item_id for e in queue)
     rows = queries.list_items(ItemFilter(frozenset(ItemStatus), ids=ids, limit=len(ids)), llm_ready=llm_ready)
-    top, done, groups = layout(queue, {i.id: i for i in rows}, queries.place_areas(ids))
+    top, done, groups, wishlist = layout(queue, {i.id: i for i in rows}, queries.place_areas(ids))
     return DigestView(
         id=row.id,
         period_start=row.period_start,
@@ -331,6 +370,7 @@ def get_digest(digest_id: int, *, llm_ready: bool) -> DigestView | None:
         top=top,
         done=done,
         groups=groups,
+        wishlist=wishlist,
         item_ids=[e.item_id for e in queue if e.role in SHOWN_ROLES],
     )
 
@@ -358,6 +398,38 @@ def list_digests(*, llm_ready: bool) -> DigestsView:
             for r in rows[1:]
             if r.id is not None
         ],
+        topics=topic_tabs(),
+    )
+
+
+def topic_tabs() -> list[TopicDigestTab]:
+    counts = sorted(organize.kept_counts(), key=lambda tn: (-tn[1], tn[0].name.casefold()))
+    return [TopicDigestTab(topic=t, open=n) for t, n in counts]
+
+
+def topic_digest(topic_id: int, *, llm_ready: bool) -> TopicDigestView | None:
+    members = organize.topic_members(topic_id)
+    if members is None:
+        return None
+    last = latest_created_at()
+    sel = select_items([c for c in queries.digest_candidates() if c.id in members.item_ids], last)
+    unseen = {c.id for c in sel.new}
+    ranked = sorted([*sel.new, *sel.carryover], key=lambda c: (*by_score(c), c.id not in unseen))
+    picks = ranked[:TOP_PICKS]
+    on_top = {c.id for c in picks}
+    fresh = [c for c in sel.new if c.id not in on_top]
+    ids = frozenset(c.id for c in (*picks, *fresh))
+    rows = queries.list_items(ItemFilter(frozenset({ItemStatus.kept}), ids=ids, limit=len(ids)), llm_ready=llm_ready)
+    items = {i.id: i for i in rows}
+    return TopicDigestView(
+        topic=members.topic,
+        overview=members.overview,
+        next=[
+            DigestPick(item=items[c.id], why=c.relevance_reason, next_action=c.next_action, refill=False)
+            for c in picks
+            if c.id in items
+        ],
+        new=[DigestLine(item=items[c.id], line=items[c.id].gist or c.summary) for c in fresh if c.id in items],
     )
 
 
@@ -372,4 +444,6 @@ def to_text(view: DigestView) -> str:
         out += ["", "Done", *(f"- {p.item.display_title} (#{p.item.id})" for p in view.done)]
     for g in view.groups:
         out += ["", g.heading, *(f"- {x.item.display_title} (#{x.item.id}): {x.line}" for x in g.lines)]
+    if view.wishlist:
+        out += ["", "On your wishlist", *(f"- {i.display_title} (#{i.id})" for i in view.wishlist)]
     return "\n".join(out)

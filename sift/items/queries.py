@@ -4,13 +4,25 @@ from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 
-from sqlalchemy import false, func, or_
+from sqlalchemy import ColumnElement, and_, case, false, func, not_, or_
 from sqlmodel import Session, col, select
 
 from sift import db
-from sift.domain import SHOWN_ROLES, Decision, ItemStatus, ItemType
-from sift.items.views import NO_DECOR, ItemDetail, ItemSummary, Readiness, to_detail, to_summary
+from sift.domain import SHOWN_ROLES, Decision, DigestRole, ItemStatus, ItemType
+from sift.items.lifecycle import WISHLIST_SHELF
+from sift.items.views import (
+    NO_DECOR,
+    ItemDetail,
+    ItemSummary,
+    KeepReason,
+    Readiness,
+    keep_reason_of,
+    keep_reason_text,
+    to_detail,
+    to_summary,
+)
 from sift.llm.schemas import OverrideExample
 from sift.models import Digest, DigestEntry, Goal, Import, Item, Outline, OutlineLabel
 from sift.organize import model
@@ -19,8 +31,27 @@ from sift.organize.store import OrganizeActivity
 
 PENDING = frozenset({ItemStatus.queued, ItemStatus.fetching, ItemStatus.processing})
 INBOX = PENDING | {ItemStatus.failed}
-KEPT = frozenset({ItemStatus.kept, ItemStatus.done})
 ARCHIVED = frozenset({ItemStatus.archived})
+
+
+class Shelf(StrEnum):
+    inbox = "inbox"
+    kept = "kept"
+    wishlist = "wishlist"
+    archived = "archived"
+
+
+def on_shelf(shelf: Shelf) -> ColumnElement[bool]:
+    status, wishlist = col(Item.status), col(Item.wishlist)
+    match shelf:
+        case Shelf.inbox:
+            return status.in_(list(INBOX))
+        case Shelf.kept:
+            return or_(status == ItemStatus.done, and_(status == ItemStatus.kept, not_(wishlist)))
+        case Shelf.wishlist:
+            return and_(status.in_(list(WISHLIST_SHELF)), wishlist)
+        case Shelf.archived:
+            return status.in_(list(ARCHIVED))
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +63,7 @@ class ItemFilter:
     topic_id: int | None = None
     label: str | None = None
     ids: frozenset[int] | None = None
+    shelf: Shelf | None = None
     limit: int = 200
 
 
@@ -49,11 +81,13 @@ def list_items(f: ItemFilter, *, llm_ready: bool) -> list[ItemSummary]:
         q = (
             select(Item, Goal.title, Outline)
             .outerjoin(Goal, col(Item.matched_goal_id) == col(Goal.id))
-            .outerjoin(Outline, organize.fresh_outline())
+            .outerjoin(Outline, organize.filed_outline())
             .where(col(Item.status).in_(list(f.statuses)))
         )
         if f.ids is not None:
             q = q.where(col(Item.id).in_(list(f.ids)))
+        if f.shelf is not None:
+            q = q.where(on_shelf(f.shelf))
         if f.goal_id is not None:
             q = q.where(Item.matched_goal_id == f.goal_id)
         if f.item_type is not None:
@@ -99,12 +133,17 @@ def get_item(item_id: int, *, llm_ready: bool) -> ItemDetail | None:
 
 def detail_in(s: Session, row: Item, ready: Readiness) -> ItemDetail:
     goal = s.get(Goal, row.matched_goal_id) if row.matched_goal_id else None
-    return to_detail(row, goal.title if goal else None, ready, organize.organization(s, row))
+    return to_detail(row, goal.title if goal else None, ready, organize.organization(s, row), _keep_reason(s, row))
+
+
+def _keep_reason(s: Session, row: Item) -> KeepReason | None:
+    goal = s.get(Goal, row.keep_goal_id) if row.keep_goal_id else None
+    return keep_reason_of(row, goal.title if goal else None)
 
 
 def summary_in(s: Session, row: Item, ready: Readiness) -> ItemSummary:
     goal = s.get(Goal, row.matched_goal_id) if row.matched_goal_id else None
-    decor = organize.decor(s, [(row, organize.fresh_outline_of(s, row))]).get(row.id or 0, NO_DECOR)
+    decor = organize.decor(s, [(row, organize.filed_outline_of(s, row))]).get(row.id or 0, NO_DECOR)
     return to_summary(row, goal.title if goal else None, ready, decor)
 
 
@@ -119,6 +158,11 @@ def queue_counts() -> dict[ItemStatus, int]:
         return _counts(s)
 
 
+def _shelf_counts(s: Session) -> dict[Shelf, int]:
+    row = s.exec(select(*(func.count(case((on_shelf(shelf), 1))) for shelf in Shelf))).one()
+    return dict(zip(Shelf, row, strict=True))
+
+
 def _counts(s: Session) -> dict[ItemStatus, int]:
     rows = s.exec(select(Item.status, func.count()).group_by(col(Item.status))).all()
     counts = Counter({status: n for status, n in rows})
@@ -128,6 +172,7 @@ def _counts(s: Session) -> dict[ItemStatus, int]:
 @dataclass(frozen=True, slots=True)
 class Activity:
     counts: dict[ItemStatus, int]
+    shelves: dict[Shelf, int]
     moving: list[ItemSummary]
     last_interaction_at: datetime | None
     last_digest_at: datetime | None
@@ -145,6 +190,7 @@ def activity(*, llm_ready: bool) -> Activity:
         summaries = (to_summary(row, None, ready, NO_DECOR) for row in unsettled)
         return Activity(
             counts=_counts(s),
+            shelves=_shelf_counts(s),
             moving=[summary for summary in summaries if summary.in_motion],
             last_interaction_at=s.exec(select(func.max(Item.last_interacted_at))).one(),
             last_digest_at=s.exec(select(func.max(Digest.created_at))).one(),
@@ -175,9 +221,15 @@ def recent_override_examples(limit: int = 10) -> list[OverrideExample]:
                 summary=r.summary or "",
                 system_decision=r.threshold_decision or Decision.archive,
                 user_decision=r.user_override or Decision.keep,
+                reason=_reason_text(s, r),
             )
             for r in rows
         ]
+
+
+def _reason_text(s: Session, row: Item) -> str:
+    reason = _keep_reason(s, row)
+    return keep_reason_text(reason.goal_title, reason.note) if reason else ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,7 +241,7 @@ class DigestCandidate:
     next_action: str | None
     relevance_reason: str | None
     matched_goal_id: int | None
-    relevance_score: int
+    relevance_score: int | None
     decided_at: datetime | None
     times_surfaced: int
     times_surfaced_since_interaction: int
@@ -198,7 +250,7 @@ class DigestCandidate:
 
 def digest_candidates() -> list[DigestCandidate]:
     with db.read_session() as s:
-        items = s.exec(select(Item).where(Item.status == ItemStatus.kept)).all()
+        items = s.exec(select(Item).where(Item.status == ItemStatus.kept, not_(col(Item.wishlist)))).all()
         appearances = s.exec(
             select(DigestEntry.item_id, Digest.created_at)
             .join(Digest, col(Digest.id) == col(DigestEntry.digest_id))
@@ -222,7 +274,7 @@ def digest_candidates() -> list[DigestCandidate]:
                 next_action=r.next_action,
                 relevance_reason=r.relevance_reason,
                 matched_goal_id=r.matched_goal_id,
-                relevance_score=r.relevance_score or 0,
+                relevance_score=r.relevance_score,
                 decided_at=r.decided_at,
                 times_surfaced=len(when),
                 times_surfaced_since_interaction=len(since),
@@ -230,6 +282,25 @@ def digest_candidates() -> list[DigestCandidate]:
             )
         )
     return out
+
+
+def wishlist_rotation(limit: int, exclude: Collection[int] = ()) -> list[int]:
+    with db.read_session() as s:
+        last = (
+            select(col(DigestEntry.item_id).label("item_id"), func.max(Digest.created_at).label("at"))
+            .join(Digest, col(Digest.id) == col(DigestEntry.digest_id))
+            .where(col(DigestEntry.role).in_([*SHOWN_ROLES, DigestRole.wishlist]))
+            .group_by(col(DigestEntry.item_id))
+            .subquery()
+        )
+        rows = s.exec(
+            select(Item.id)
+            .outerjoin(last, last.c.item_id == col(Item.id))
+            .where(on_shelf(Shelf.wishlist), col(Item.id).not_in(list(exclude)))
+            .order_by(last.c.at.asc().nulls_first(), col(Item.id))
+            .limit(limit)
+        ).all()
+    return [i for i in rows if i is not None]
 
 
 def place_areas(ids: Collection[int]) -> dict[int, str]:

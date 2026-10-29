@@ -8,6 +8,7 @@ from typing import Any
 class Source(StrEnum):
     instagram = "instagram"
     threads = "threads"
+    image = "image"
 
 
 class ItemStatus(StrEnum):
@@ -69,6 +70,7 @@ class DigestRole(StrEnum):
     pick = "pick"
     new = "new"
     carryover = "carryover"
+    wishlist = "wishlist"
 
 
 SHOWN_ROLES: frozenset[DigestRole] = frozenset({DigestRole.pick, DigestRole.new})

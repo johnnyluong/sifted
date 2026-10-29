@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+import { ArrowLeft } from "lucide-react";
 import type { JSX, ReactNode } from "react";
 import { useStatus } from "@/api";
 import { NoticeBanner } from "@/components/notice-banner";
@@ -39,5 +41,50 @@ export function Empty({ title, children }: { title: string; children: ReactNode 
       <p className="font-semibold">{title}</p>
       <p className="mx-auto mt-1 max-w-[46ch] text-silt">{children}</p>
     </div>
+  );
+}
+
+export function BackLink({
+  to,
+  children,
+}: {
+  to: "/inbox" | "/kept" | "/wishlist" | "/archived" | "/digests" | "/topics";
+  children: ReactNode;
+}): JSX.Element {
+  return (
+    <Link
+      to={to}
+      className="mb-[18px] inline-flex items-center gap-1 text-[13px] text-silt hover:text-graphite max-[700px]:-my-3 max-[700px]:mb-1.5 max-[700px]:py-3 max-[700px]:text-[15px]"
+    >
+      <ArrowLeft aria-hidden className="size-3.5" />
+      {children}
+    </Link>
+  );
+}
+
+export function PageSection({
+  title,
+  hint,
+  aside,
+  className,
+  children,
+}: {
+  title: string;
+  hint?: ReactNode;
+  aside?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}): JSX.Element {
+  return (
+    <section className={cn("mt-10", className)}>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div>
+          <h2 className="font-semibold">{title}</h2>
+          {hint && <p className="mt-0.5 text-[13px] text-silt">{hint}</p>}
+        </div>
+        {aside}
+      </div>
+      {children}
+    </section>
   );
 }

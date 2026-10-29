@@ -55,6 +55,8 @@ class Item(SQLModel, table=True):
             "scored_at IS NULL OR (relevance_score IS NOT NULL AND threshold_decision IS NOT NULL)",
             name="ck_score_complete",
         ),
+        CheckConstraint("wishlist_override IS NULL OR wishlist = wishlist_override", name="ck_wishlist_override"),
+        {"sqlite_autoincrement": True},
     )
 
     id: int | None = Field(default=None, primary_key=True)
@@ -108,8 +110,13 @@ class Item(SQLModel, table=True):
     model_decision: Decision | None = None
     threshold_decision: Decision | None = None
 
+    wishlist: bool = False
+    wishlist_override: bool | None = None
     user_override: Decision | None = None
     overridden_at: datetime | None = _ts()
+    keep_goal_id: int | None = Field(default=None, foreign_key="goals.id")
+    keep_note: str | None = None
+    keep_reason_at: datetime | None = _ts()
     last_interacted_at: datetime | None = _ts()
     decided_at: datetime | None = _ts()
     processed_at: datetime | None = _ts()
@@ -193,9 +200,7 @@ class ImportLink(SQLModel, table=True):
         UniqueConstraint("import_id", "source", "canonical_id", name="uq_import_links_ref"),
         Index("ix_import_links_drip", "state", "import_id", "saved_at"),
         Index("ix_import_links_released", "released_at"),
-        CheckConstraint(
-            "state != 'released' OR (item_id IS NOT NULL AND released_at IS NOT NULL)", name="ck_released_has_item"
-        ),
+        CheckConstraint("state != 'released' OR released_at IS NOT NULL", name="ck_released_has_time"),
     )
 
     id: int | None = Field(default=None, primary_key=True)

@@ -14,6 +14,7 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 from sift.domain import FailureKind, MediaKind, ProcessingError, Source, SourceRef
+from sift.media import MAX_FRAMES, MAX_IMAGES
 from sift.sources.base import CookieSource, FetchResult
 from sift.sources.instagram import (
     MAX_SLIDES,
@@ -25,7 +26,7 @@ from sift.sources.instagram import (
     short_error,
     slides_of,
 )
-from sift.sources.threads import ThreadsFetcher, looks_like_thread, parse_oembed, parse_page
+from sift.sources.threads import Media, ThreadsFetcher, looks_like_thread, parse_oembed, parse_page
 
 if TYPE_CHECKING:
     from yt_dlp import _Params
@@ -61,8 +62,13 @@ def test_parse_page_finds_text_image_and_video() -> None:
         '<script type="application/json">{"video_versions":[{"type":101,"url":"https:\\/\\/cdn.example\\/v.mp4"}]}</script>'
         "</body></html>"
     )
-    text, image, video = parse_page(html)
-    assert (text, image, video) == ("Pasta tips", "https://cdn.example/x.jpg", "https://cdn.example/v.mp4")
+    page = parse_page(html, "T1")
+    assert (page.text, page.image_url, page.media) == (
+        "Pasta tips",
+        "https://cdn.example/x.jpg",
+        (Media(None, "https://cdn.example/v.mp4"),),
+    )
+    assert (page.before, page.after) == ((), ())
 
 
 def test_a_long_carousel_is_capped_with_a_note() -> None:
@@ -451,3 +457,186 @@ def test_threads_share_link_that_does_not_reach_a_post_is_unsupported() -> None:
 class _NoPages:
     def get(self, url: str) -> str:
         raise AssertionError("no page fetch after a failed oEmbed")
+
+
+def _fetch_thread(page: str, tmp_path: Path, *, code: str = "T1", first: str = "Part one, a thread 1/") -> FetchResult:
+    oembed = {"html": f"<blockquote><p>{first}</p></blockquote>", "author_name": "@founder"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "graph.threads.net":
+            return httpx.Response(200, json=oembed)
+        if "/broken." in request.url.path:
+            return httpx.Response(500)
+        return httpx.Response(200, content=str(request.url).encode())
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+
+    class Page:
+        def get(self, url: str) -> str:
+            return page
+
+    ref = SourceRef(Source.threads, code, f"https://www.threads.com/@founder/post/{code}")
+    return ThreadsFetcher(pages=Page(), http=http).fetch(ref, tmp_path)
+
+
+def _post(text: str | None, user: str = "founder", **extra: object) -> dict[str, object]:
+    return {"caption": {"text": text} if text is not None else None, "user": {"username": user}, **extra}
+
+
+def _photo(name: str) -> dict[str, object]:
+    return {"image_versions2": {"candidates": [{"url": f"https://cdn.example/{name}.jpg"}]}}
+
+
+def _video(name: str) -> dict[str, object]:
+    return {**_photo(f"{name}-cover"), "video_versions": [{"url": f"https://cdn.example/{name}.mp4"}]}
+
+
+def _downloaded(paths: tuple[Path, ...]) -> list[str]:
+    return [p.read_text().removeprefix("https://cdn.example/") for p in paths]
+
+
+def _thread_page(
+    after: list[dict[str, object]],
+    *,
+    before: list[dict[str, object]] | None = None,
+    more: bool = False,
+    more_before: bool = False,
+    main: dict[str, object] | None = None,
+) -> str:
+    def thread(key: str, nodes: list[dict[str, object]], next_page: bool = False) -> dict[str, object]:
+        return {key: {"posts": {"edges": [{"node": n} for n in nodes], "page_info": {"has_next_page": next_page}}}}
+
+    video = {"video_versions": [{"url": "https://cdn.example/other.mp4"}]}
+    data = {
+        "relatedPosts": {"media": {"id": "5_2", "text_post_app_info": thread("self_thread", [_post("Not this one")])}},
+        "media": {"code": "T1", "pk": "7", "user": {"username": "founder"}, "video_versions": [], **(main or {})},
+        "thread": {
+            "media": {
+                "id": "7_9",
+                "text_post_app_info": {
+                    **thread("containing_thread", before or [], more_before),
+                    **thread("self_thread", after, more),
+                },
+            }
+        },
+        "later": {"media": {"code": "T3", "pk": "8", **video}},
+    }
+    payload = json.dumps({"require": [[{"__bbox": {"result": {"data": data}}}]]})
+    return f'<html><body><script type="application/json">{payload}</script></body></html>'
+
+
+THREAD_OPENINGS = ["He spent months emailing", "Reddit and niche Facebook", "The Reddit unlock", "Avneesh breaks down"]
+
+
+@pytest.mark.parametrize(("fixture", "code", "part"), [("first", "De9xrVOmpY5", 0), ("third", "De9xt7tmod4", 2)])
+def test_a_saved_thread_reads_in_order_from_any_of_its_posts(
+    fixture: str, code: str, part: int, tmp_path: Path
+) -> None:
+    page = (FIXTURES / f"threads_thread_{fixture}_post.html").read_text()
+    result = _fetch_thread(page, tmp_path, code=code, first=THREAD_OPENINGS[part])
+    text = result.post_text or ""
+    assert [text.count(o) for o in THREAD_OPENINGS] == [1, 1, 1, 1]
+    assert [text.find(o) for o in THREAD_OPENINGS] == sorted(text.find(o) for o in THREAD_OPENINGS)
+    assert result.notes.lines == ("Read all 4 posts of this thread.",)
+    assert result.media_kind is MediaKind.image
+    assert len(result.slide_paths) == 2, "the two photos of the first post"
+
+
+def test_only_the_posts_own_thread_is_read(tmp_path: Path) -> None:
+    result = _fetch_thread(
+        _thread_page([{**_post("Part two"), **_photo("p")}, _post(None), _post(" Part four ")]), tmp_path
+    )
+    assert result.post_text == "Part one, a thread 1/\n\nPart two\n\nPart four"
+    assert result.video_path is None, "a video outside the thread is not read"
+    assert _downloaded(result.slide_paths) == ["p.jpg"]
+    assert result.notes.lines == ("Read all 4 posts of this thread.",)
+
+
+def test_every_photo_and_video_in_the_thread_is_read(tmp_path: Path) -> None:
+    before = [{**_post("Part one"), "carousel_media": [_photo("a"), _video("early")]}]
+    page = _thread_page([{**_post("Part three"), **_photo("c")}], before=before, main=_video("own"))
+    result = _fetch_thread(page, tmp_path, first="Part two")
+    assert result.media_kind is MediaKind.video
+    assert result.video_path is not None and result.video_path.read_text().endswith("own.mp4"), (
+        "the shared post's video"
+    )
+    assert _downloaded(result.slide_paths) == ["a.jpg", "early-cover.jpg", "c.jpg"]
+    assert result.notes.lines == (
+        "Read all 3 posts of this thread.",
+        "Watched only one of the 2 videos in this thread.",
+    )
+
+
+@pytest.mark.parametrize(
+    ("video", "kind", "slides", "fallback"),
+    [
+        (_video("broken"), MediaKind.image, ["broken-cover.jpg"], "read its cover image instead"),
+        ({"video_versions": [{"url": "https://cdn.example/broken.mp4"}]}, MediaKind.text, [], "used the text only"),
+    ],
+)
+def test_a_video_that_will_not_download_falls_back(
+    video: dict[str, object], kind: MediaKind, slides: list[str], fallback: str, tmp_path: Path
+) -> None:
+    result = _fetch_thread(_thread_page([], main=video), tmp_path, first="Look")
+    assert (result.media_kind, result.video_path) == (kind, None)
+    assert _downloaded(result.slide_paths) == slides
+    assert result.notes.lines == (f"The video could not be downloaded (HTTPStatusError); {fallback}.",)
+
+
+def test_too_many_images_keep_the_posts_own_and_leave_room_for_the_video(tmp_path: Path) -> None:
+    room = MAX_IMAGES - MAX_FRAMES
+    before = [{**_post("Part one"), "carousel_media": [_photo(f"b{i}") for i in range(room + 2)]}]
+    page = _thread_page([], before=before, main={"carousel_media": [_video("own"), _photo("mine")]})
+    result = _fetch_thread(page, tmp_path, first="Part two")
+    assert result.video_path is not None
+    assert _downloaded(result.slide_paths) == [*(f"b{i}.jpg" for i in range(room - 1)), "mine.jpg"]
+    assert result.notes.lines[-1] == f"Read {room} of {room + 3} photos and video covers, this post's own first."
+
+
+def test_a_photo_post_without_text_is_read_from_its_photos(tmp_path: Path) -> None:
+    photos = [_photo(f"p{i}") for i in range(MAX_IMAGES + 2)]
+    result = _fetch_thread(
+        _thread_page([], main={"carousel_media": [*photos[:2], _photo("broken"), *photos[2:]]}), tmp_path, first=""
+    )
+    assert (result.media_kind, result.post_text) == (MediaKind.image, None)
+    assert len(result.slide_paths) == MAX_IMAGES - 1
+    assert result.thumbnail_path == result.slide_paths[0]
+    assert result.notes.lines == (
+        f"Read {MAX_IMAGES} of {MAX_IMAGES + 3} photos and video covers, this post's own first.",
+        f"1 of {MAX_IMAGES} images could not be downloaded.",
+    )
+
+
+def test_a_reply_keeps_only_its_authors_run_of_posts(tmp_path: Path) -> None:
+    before = [_post("Someone's question", user="asker"), _post("My answer"), _post("More of my answer")]
+    result = _fetch_thread(_thread_page([], before=before), tmp_path, first="Last of my answer")
+    assert result.post_text == "My answer\n\nMore of my answer\n\nLast of my answer"
+    assert result.notes.lines == (
+        "Read all 3 posts of this thread.",
+        "Earlier posts by other people in this conversation were not read.",
+    )
+
+
+def test_a_thread_whose_first_post_has_no_text_is_read_from_the_rest(tmp_path: Path) -> None:
+    result = _fetch_thread(_thread_page([_post("Part two")], more=True), tmp_path, first="")
+    assert result.post_text == "Part two"
+    assert result.notes.lines == ("Read 2 posts of this thread; Threads did not send the rest.",)
+
+
+def test_a_thread_missing_its_start_says_so(tmp_path: Path) -> None:
+    result = _fetch_thread(_thread_page([], before=[_post("Part two")], more_before=True), tmp_path, first="Part three")
+    assert result.post_text == "Part two\n\nPart three"
+    assert result.notes.lines == ("Read 2 posts of this thread; Threads did not send the rest.",)
+
+
+def test_a_video_slide_in_the_post_is_its_video() -> None:
+    slides = [{"video_versions": []}, {"video_versions": [{"url": "https://cdn.example/slide.mp4"}]}]
+    payload = json.dumps({"media": {"code": "T1", "pk": "7", "carousel_media": slides, "text_post_app_info": {}}})
+    page = parse_page(f'<script type="application/json">{payload}</script>', "T1")
+    assert page.media == (Media(None, "https://cdn.example/slide.mp4"),)
+
+
+def test_a_post_without_follow_ups_keeps_the_partial_thread_note(tmp_path: Path) -> None:
+    result = _fetch_thread("<html></html>", tmp_path)
+    assert result.post_text == "Part one, a thread 1/"
+    assert result.notes.lines == ("Looks like part of a multi-post thread; only this post was read.",)

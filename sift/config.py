@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     import_gap_seconds: float = Field(default=180.0, ge=1)
     import_daily_cap: int = Field(default=100, ge=1)
     import_max_bytes: int = Field(default=2 * 1024**3, ge=1)
+    upload_max_bytes: int = Field(default=25 * 1024**2, ge=1)
 
     digest_cron: str = "0 18 * * SUN"
     timezone: str = "America/New_York"
@@ -84,6 +85,10 @@ class Settings(BaseSettings):
     @property
     def imports_dir(self) -> Path:
         return self.data_dir / "imports"
+
+    @property
+    def uploads_dir(self) -> Path:
+        return self.data_dir / "uploads"
 
     @property
     def logs_dir(self) -> Path:

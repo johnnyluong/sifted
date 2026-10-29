@@ -1,7 +1,16 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { http, unwrap } from "./client";
+import { http, ok, unwrap } from "./client";
 import { api } from "./queries";
-import type { GoalCreate, GoalPatch, ImportAction, SetupAnswer, SetupApply, UserAction } from "./types";
+import type {
+  GoalCreate,
+  GoalPatch,
+  ImportAction,
+  RebuildApply,
+  SetupAnswer,
+  SetupApply,
+  TopicCreate,
+  UserAction,
+} from "./types";
 
 const quiet = { quietErrors: true };
 
@@ -12,12 +21,78 @@ export function useSubmitLinks() {
   });
 }
 
+export function useUploadImage() {
+  return useMutation({
+    mutationFn: (file: File) =>
+      unwrap(
+        http.POST("/api/uploads", {
+          params: { query: { channel: "web" } },
+          body: file,
+          bodySerializer: (body) => body,
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+        }),
+      ),
+    meta: quiet,
+  });
+}
+
+export function useStoreImage() {
+  return useMutation({
+    mutationFn: (file: File) =>
+      unwrap(
+        http.POST("/api/uploads/files", {
+          body: file,
+          bodySerializer: (body) => body,
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+        }),
+      ),
+    meta: quiet,
+  });
+}
+
+export function useAddImageSet() {
+  return useMutation({
+    mutationFn: (names: string[]) => unwrap(http.POST("/api/uploads/sets", { body: { names, channel: "web" } })),
+    meta: quiet,
+  });
+}
+
 export function useItemAction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, action }: { id: number; action: UserAction }) =>
       unwrap(http.POST("/api/items/{item_id}/actions/{action}", { params: { path: { item_id: id, action } } })),
     onSuccess: (detail) => queryClient.setQueryData(api.item(detail.id).queryKey, detail),
+  });
+}
+
+export function useDeleteItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => ok(http.DELETE("/api/items/{item_id}", { params: { path: { item_id: id } } })),
+    // Before the refetch-everything on settle, which would GET the deleted post and keep its stale copy cached.
+    onSuccess: (_, id) => queryClient.removeQueries({ queryKey: api.item(id).queryKey, exact: true }),
+  });
+}
+
+export function useSetWishlist() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, on }: { id: number; on: boolean | null }) =>
+      unwrap(http.PUT("/api/items/{item_id}/wishlist", { params: { path: { item_id: id } }, body: { on } })),
+    onSuccess: (detail) => queryClient.setQueryData(api.item(detail.id).queryKey, detail),
+  });
+}
+
+export function useSetKeepReason() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, goal_id, note }: { id: number; goal_id: number | null; note: string }) =>
+      unwrap(
+        http.PUT("/api/items/{item_id}/keep-reason", { params: { path: { item_id: id } }, body: { goal_id, note } }),
+      ),
+    onSuccess: (detail) => queryClient.setQueryData(api.item(detail.id).queryKey, detail),
+    meta: quiet,
   });
 }
 
@@ -89,6 +164,21 @@ export function useSetItemTopic() {
   return useMutation({
     mutationFn: ({ id, topic }: { id: number; topic: number | null }) =>
       unwrap(http.PUT("/api/items/{item_id}/topic", { params: { path: { item_id: id } }, body: { topic_id: topic } })),
+  });
+}
+
+export function useCreateTopic() {
+  return useMutation({ mutationFn: (body: TopicCreate) => unwrap(http.POST("/api/topics", { body })), meta: quiet });
+}
+
+export function useDraftRebuild() {
+  return useMutation({ mutationFn: () => unwrap(http.POST("/api/topics/rebuild/draft")), meta: quiet });
+}
+
+export function useApplyRebuild() {
+  return useMutation({
+    mutationFn: (body: RebuildApply) => unwrap(http.POST("/api/topics/rebuild", { body })),
+    meta: quiet,
   });
 }
 

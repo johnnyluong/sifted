@@ -29,15 +29,20 @@ from sift.llm.schemas import (
     ProductCard,
     ProductDetails,
     ProposedGoal,
+    RebuiltTopicDraft,
     RecipeCard,
     RecipeDetails,
     ScoreInput,
     ScoreOutput,
     SetupDraft,
     SetupInput,
+    TopicFitDraft,
+    TopicFitInput,
     TopicMergeDraft,
     TopicPlanDraft,
     TopicPlanInput,
+    TopicRebuildDraft,
+    TopicRebuildInput,
     TopPick,
 )
 
@@ -49,6 +54,7 @@ _KEYWORDS: list[tuple[ItemType, re.Pattern[str]]] = [
     (ItemType.playbook, re.compile(r"\b(steps?|strategy|playbook|how to|framework|growth|marketing|funnel)\b", re.I)),
     (ItemType.product, re.compile(r"(\$\d|\bprice\b|\bbuy\b|\bproduct\b)", re.I)),
 ]
+_FREE = re.compile(r"\b(free|open[- ]source|github)\b", re.I)
 _WORD = re.compile(r"[a-z]{4,}")
 _STOP = frozenset({"this", "that", "with", "from", "your", "have", "what", "will", "about", "into", "more", "they"})
 
@@ -112,7 +118,9 @@ def _card(item_type: ItemType, title: str, summary: str, text: str) -> Card:
                 title=title,
                 summary=summary,
                 next_action=action,
-                details=ProductDetails(name=title, what_it_is=summary, price=None, link=None),
+                details=ProductDetails(
+                    name=title, what_it_is=summary, price=None, link=None, wishlist=not _FREE.search(text)
+                ),
             )
         case ItemType.idea:
             return IdeaCard(
@@ -183,7 +191,9 @@ class FakeLLM:
         ), MODEL
 
     def compose_digest(self, inp: DigestInput) -> tuple[DigestDraft, str]:
-        ranked = sorted(inp.items, key=lambda i: (i.status != "new", -i.relevance_score))
+        ranked = sorted(
+            inp.items, key=lambda i: (i.status != "new", i.relevance_score is None, -(i.relevance_score or 0))
+        )
         top = [
             TopPick(
                 item_id=i.item_id,
@@ -262,3 +272,23 @@ class FakeLLM:
         ]
         values = "\n".join(a.answer for a in inp.answers if a.id != "areas")
         return SetupDraft(goals=goals, deactivate=[], values_text=values), MODEL
+
+    def rebuild_topics(self, inp: TopicRebuildInput) -> tuple[TopicRebuildDraft, str]:
+        shelves: dict[str, list[int]] = {}
+        for p in inp.posts:
+            shelves.setdefault(_SHELF[p.item_type], []).append(p.id)
+        return TopicRebuildDraft(
+            topics=[
+                RebuiltTopicDraft(
+                    name=name,
+                    description=f"Saved {name.lower()}.",
+                    continues=[t.id for t in inp.topics if _shelf_key(t.name) == _shelf_key(name)],
+                    posts=posts,
+                )
+                for name, posts in shelves.items()
+            ]
+        ), MODEL
+
+    def fit_topic(self, inp: TopicFitInput) -> tuple[TopicFitDraft, str]:
+        words = _words(f"{inp.topic} {inp.description}")
+        return TopicFitDraft(posts=[p.id for p in inp.posts if words & _words(f"{p.title} {p.gist}")]), MODEL

@@ -36,6 +36,11 @@ and how to check the result. CLAUDE.md has the workflow around it.
 - **New packages wait a week.** `web/bunfig.toml` sets `minimumReleaseAge`; name a range, not a
   version published in the last 7 days.
 - **`@dnd-kit/react` is pre-1.0.** Keep every use of it in `web/src/components/shelf.tsx`.
+- **Build pages from the shared pieces before writing markup.** `components/page.tsx` has `Page`,
+  `PageHeader`, `PageSection`, `BackLink` and `Empty`; `components/ui/` has `Button`, `chipClass`,
+  the fields with `Choice` and `FieldError`, `Eyebrow`, `Tag`, `Popover` and `Sheet`; the
+  `surface` and `surface-pad` utilities draw a card. When a class string turns up a second
+  time, make it a component there instead of copying it.
 
 ## Mistakes this project has paid for
 

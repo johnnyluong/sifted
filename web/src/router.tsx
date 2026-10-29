@@ -6,7 +6,9 @@ import { homeRoute } from "./pages/home";
 import { importRoute } from "./pages/import";
 import { inboxRoute } from "./pages/inbox";
 import { itemRoute } from "./pages/item";
-import { archivedRoute, keptRoute } from "./pages/library";
+import { archivedRoute, keptRoute, wishlistRoute } from "./pages/library";
+import { rebuildRoute } from "./pages/rebuild";
+import { roadmapRoute } from "./pages/roadmap";
 import { rootRoute } from "./pages/root";
 import { setupRoute } from "./pages/setup";
 import { shareRoute } from "./pages/share";
@@ -16,9 +18,11 @@ const routeTree = rootRoute.addChildren([
   homeRoute,
   inboxRoute,
   keptRoute,
+  wishlistRoute,
   archivedRoute,
   itemRoute,
   topicsRoute,
+  rebuildRoute,
   topicRoute,
   goalsRoute,
   setupRoute,
@@ -26,6 +30,7 @@ const routeTree = rootRoute.addChildren([
   shareRoute,
   digestsRoute,
   digestRoute,
+  roadmapRoute,
 ]);
 
 export function createAppRouter(queryClient: QueryClient) {

@@ -32,6 +32,7 @@ from sift.media import MlxWhisperTranscriber, Transcriber
 from sift.pipeline import Pacer, PipelineDeps
 from sift.sources import Fetchers
 from sift.sources.base import CookieSource
+from sift.sources.image import ImageFetcher
 from sift.sources.instagram import InstagramFetcher
 from sift.sources.threads import CookiePageSource, ThreadsFetcher
 from sift.worker import Worker
@@ -127,6 +128,7 @@ def build_runtime(settings: Settings, overrides: Overrides | None = None) -> Run
     fetchers = o.fetchers or Fetchers(
         instagram=InstagramFetcher(cookies),
         threads=ThreadsFetcher(CookiePageSource(cookies), httpx.Client(timeout=20)),
+        image=ImageFetcher(settings.uploads_dir),
     )
     llm = o.llm if o.use_llm_override else build_llm(settings)
     notifier = o.notifier or LogNotifier()

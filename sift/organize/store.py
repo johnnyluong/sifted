@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import logging
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, TypeGuard
+from typing import Annotated, Any, TypeGuard
 
-from pydantic import BaseModel, Field
-from sqlalchemy import ColumnElement, and_, case, delete, func, or_
+from pydantic import BaseModel, Field, StringConstraints
+from sqlalchemy import ColumnElement, and_, case, delete, func, not_, or_
 from sqlmodel import Session, col, select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from sift import db, goals
-from sift.domain import BriefState, ItemStatus, ItemType, Source
+from sift.domain import BriefState, ItemStatus, ItemType, ProcessingError, Source
 from sift.items.views import Decor, ItemOrganization, ItemRef, TopicRef, card_of, display_title
+from sift.llm.client import LLM
 from sift.llm.schemas import (
     BriefInput,
     BriefPointIn,
@@ -20,14 +23,19 @@ from sift.llm.schemas import (
     OutlineInput,
     PlanPost,
     PlanTopicLine,
+    RebuildPostIn,
+    RebuildTopicIn,
+    TopicFitInput,
     TopicMoveExample,
     TopicOption,
     TopicPlanInput,
+    TopicRebuildInput,
 )
 from sift.models import Goal, Item, Outline, OutlineLabel, Topic, TopicMergeSuggestion
 from sift.organize import model
 from sift.organize.model import (
     MAX_TOPICS,
+    TOPIC_NAME_MAX,
     Brief,
     BriefClock,
     ExistingTopic,
@@ -38,6 +46,8 @@ from sift.organize.model import (
     Unsorted,
 )
 
+log = logging.getLogger(__name__)
+
 MEMBER_STATUSES = (ItemStatus.kept, ItemStatus.done)
 OUTLINE_STATUSES = (*MEMBER_STATUSES, ItemStatus.queued, ItemStatus.archived)
 ARCHIVED = (ItemStatus.archived,)
@@ -46,6 +56,10 @@ VOCABULARY = 60
 MOVE_EXAMPLES = 10
 TOP_LABELS = 3
 LABEL_CHIPS = 30
+REBUILD_MAX_POSTS = 200
+REBUILD_MIN_POSTS = 2
+
+TopicName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=TOPIC_NAME_MAX)]
 
 
 class NotFound(Exception):
@@ -148,12 +162,47 @@ class Dissolved(BaseModel):
     rehoming: int = Field(description="Posts the organizer will place on other topics.")
 
 
+class TopicCreated(BaseModel):
+    topic: TopicDetail
+    not_moved: str | None = Field(description="Why no kept posts were moved, when you asked for them to be.")
+
+
+class PlannedTopic(BaseModel):
+    name: str
+    description: str
+    continues: list[TopicRef] = Field(description="Current topics it keeps or absorbs; empty for a new topic.")
+    posts: list[ItemRef]
+
+
+class RebuildPlan(BaseModel):
+    topics: list[PlannedTopic]
+    unsorted: list[ItemRef] = Field(description="Kept posts the draft placed nowhere; Sift sorts them after you apply.")
+    retiring: list[TopicRef] = Field(description="Current topics no planned topic continues.")
+
+
+class PlannedTopicIn(BaseModel):
+    name: TopicName
+    description: str = ""
+    continues: list[int] = Field(description="ids of current topics it keeps or absorbs.")
+    posts: list[int] = Field(description="ids of the kept posts placed on it.")
+
+
+class RebuildApply(BaseModel):
+    topics: list[PlannedTopicIn] = Field(min_length=1, max_length=MAX_TOPICS)
+    resort: list[int] = Field(default=[], description="Posts the draft offered that no topic takes; Sift sorts them.")
+    retire: list[int] = Field(default=[], description="Current topics to remove. A topic named nowhere stays as it is.")
+
+
 def effective_topic() -> ColumnElement[int | None]:
     return func.coalesce(col(Outline.topic_override_id), col(Outline.topic_id))
 
 
-def fresh_outline() -> ColumnElement[bool]:
-    return and_(col(Outline.item_id) == col(Item.id), col(Outline.extracted_at) == col(Item.extracted_at))
+def filed_outline() -> ColumnElement[bool]:
+    return and_(
+        col(Outline.item_id) == col(Item.id),
+        col(Outline.extracted_at) == col(Item.extracted_at),
+        not_(col(Item.wishlist)),
+    )
 
 
 def _live() -> ColumnElement[bool]:
@@ -214,7 +263,7 @@ def _members(s: Session, topic_ids: Iterable[int]) -> dict[int, list[_Kept]]:
     rows = s.exec(
         select(Outline, Item.relevance_score, Item.received_at, Item.matched_goal_id)
         .select_from(Item)
-        .join(Outline, fresh_outline())
+        .join(Outline, filed_outline())
         .where(col(Item.status).in_(MEMBER_STATUSES), effective_topic().in_(ids))
     ).all()
     for o, relevance, received_at, goal_id in rows:
@@ -267,7 +316,9 @@ def _state(t: Topic, kept: Sequence[_Kept]) -> BriefState:
     return BriefState.fresh if t.brief_basis == model.basis(kept) else BriefState.stale
 
 
-def fresh_outline_of(s: Session, row: Item) -> Outline | None:
+def filed_outline_of(s: Session, row: Item) -> Outline | None:
+    if row.wishlist:
+        return None
     outline = s.get(Outline, row.id)
     return outline if outline is not None and outline.extracted_at == row.extracted_at else None
 
@@ -288,7 +339,7 @@ def decor(s: Session, rows: Sequence[tuple[Item, Outline | None]]) -> dict[int, 
 
 
 def organization(s: Session, row: Item) -> ItemOrganization | None:
-    outline = fresh_outline_of(s, row)
+    outline = filed_outline_of(s, row)
     if outline is None or row.id is None:
         return None
     effective = topic_of(outline)
@@ -347,6 +398,7 @@ def _outline_targets(s: Session, *where: ColumnElement[bool], limit: int | None 
         .where(
             col(Item.extracted_at).is_not(None),
             col(Item.status).in_(OUTLINE_STATUSES),
+            not_(col(Item.wishlist)),
             or_(
                 col(Outline.item_id).is_(None),
                 col(Outline.extracted_at) != col(Item.extracted_at),
@@ -377,13 +429,8 @@ def pending_outlines(targets: Iterable[OutlineTarget]) -> set[OutlineTarget]:
 
 
 def _topic_counts(s: Session, statuses: Sequence[ItemStatus]) -> dict[int, int]:
-    rows = s.exec(
-        select(effective_topic(), func.count())
-        .select_from(Item)
-        .join(Outline, fresh_outline())
-        .where(col(Item.status).in_(statuses))
-        .group_by(effective_topic())
-    ).all()
+    q = select(effective_topic(), func.count()).select_from(Item).join(Outline, filed_outline())
+    rows = s.exec(q.where(col(Item.status).in_(statuses)).group_by(effective_topic())).all()
     return {tid: n for tid, n in rows if tid is not None}
 
 
@@ -395,7 +442,7 @@ def _vocabulary(s: Session) -> list[str]:
     rows = s.exec(
         select(OutlineLabel.label, func.count())
         .join(Outline, col(Outline.item_id) == col(OutlineLabel.item_id))
-        .join(Item, fresh_outline())
+        .join(Item, filed_outline())
         .where(col(Item.status).in_(MEMBER_STATUSES))
         .group_by(col(OutlineLabel.label))
         .order_by(func.count().desc(), col(OutlineLabel.label))
@@ -472,7 +519,7 @@ def _kept_topic_count(s: Session) -> int:
     return s.exec(
         select(func.count(func.distinct(effective_topic())))
         .select_from(Item)
-        .join(Outline, fresh_outline())
+        .join(Outline, filed_outline())
         .where(col(Item.status).in_(MEMBER_STATUSES))
     ).one()
 
@@ -833,7 +880,7 @@ def list_topics() -> TopicsView:
     summaries = [_summary(t, members.get(t.id or 0, []), archived.get(t.id or 0, 0), goal_refs) for t in live]
     grouped: dict[int | None, list[TopicSummary]] = defaultdict(list)
     for summary in summaries:
-        if summary.kept:
+        if summary.kept or not summary.archived:
             grouped[summary.goal.id if summary.goal else None].append(summary)
     keys: list[int | None] = [g for g in order if g in grouped]
     if None in grouped:
@@ -889,6 +936,29 @@ def _brief_view(s: Session, t: Topic, kept: Sequence[_Kept]) -> BriefView | None
     )
 
 
+def kept_counts() -> list[tuple[TopicRef, int]]:
+    with db.read_session() as s:
+        counts = _topic_counts(s, (ItemStatus.kept,))
+        return [(_ref(t), counts[t.id]) for t in _live_topics(s) if t.id in counts]
+
+
+@dataclass(frozen=True, slots=True)
+class TopicMembers:
+    topic: TopicRef
+    overview: str
+    item_ids: frozenset[int]
+
+
+def topic_members(topic_id: int) -> TopicMembers | None:
+    with db.read_session() as s:
+        t = _survivor(s, s.get(Topic, topic_id))
+        if t is None or t.id is None:
+            return None
+        brief = _brief(t)
+        kept = _members(s, [t.id])[t.id]
+        return TopicMembers(_ref(t), brief.overview if brief else t.description, frozenset(k.item_id for k in kept))
+
+
 def _labels(label_lists: Iterable[Iterable[str]]) -> list[LabelCount]:
     counts = Counter(label for labels in label_lists for label in labels)
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:LABEL_CHIPS]
@@ -918,7 +988,7 @@ def labels(topic_id: int | None = None) -> list[LabelCount]:
         q = (
             select(Outline.labels)
             .select_from(Item)
-            .join(Outline, fresh_outline())
+            .join(Outline, filed_outline())
             .where(col(Item.status).in_(MEMBER_STATUSES))
         )
         if topic_id is not None:
@@ -941,9 +1011,7 @@ def rename_topic(topic_id: int, name: str | None, description: str | None, now: 
     with db.write_session() as s:
         t = _live_topic(s, topic_id)
         if name is not None:
-            new = model.proposed(name, "")
-            if new is None:
-                raise Conflict("A topic name needs a letter or a digit.")
+            new = _proposed_name(name, "")
             other = s.exec(select(Topic).where(Topic.slug == new.slug, Topic.id != topic_id)).first()
             if _is_live(other):
                 raise Conflict(f'"{other.name}" is already a topic. Merge into it instead.')
@@ -976,36 +1044,238 @@ def merge_topics(source_id: int, into_id: int, now: datetime) -> TopicDetail:
             return _detail(target.id)
         if not _is_live(source):
             raise NotFound("Topic not found")
-        for row in s.exec(select(Outline).where(Outline.topic_id == source_id)).all():
-            row.topic_id = target.id
-        for row in s.exec(select(Outline).where(Outline.topic_override_id == source_id)).all():
-            row.topic_override_id = target.id
-        for alias in s.exec(select(Topic).where(Topic.merged_into_id == source_id)).all():
-            alias.merged_into_id = target.id
-        source.merged_into_id = target.id
-        for k, v in _cleared_brief().items():
-            setattr(source, k, v)
-        source.updated_at = target.updated_at = now
+        _merge(s, source, target, now)
         target_id = target.id
     return _detail(target_id)
 
 
+def _merge(s: Session, source: Topic, target: Topic, now: datetime) -> None:
+    for row in s.exec(select(Outline).where(Outline.topic_id == source.id)).all():
+        row.topic_id = target.id
+    for row in s.exec(select(Outline).where(Outline.topic_override_id == source.id)).all():
+        row.topic_override_id = target.id
+    for alias in s.exec(select(Topic).where(Topic.merged_into_id == source.id)).all():
+        alias.merged_into_id = target.id
+    source.merged_into_id = target.id
+    for k, v in _cleared_brief().items():
+        setattr(source, k, v)
+    source.updated_at = target.updated_at = now
+
+
 def dissolve_topic(topic_id: int, now: datetime) -> Dissolved:
     with db.write_session() as s:
-        t = _live_topic(s, topic_id)
-        rehoming = 0
-        for row in s.exec(select(Outline).where(Outline.topic_id == topic_id)).all():
-            row.topic_id = None
+        rows = _retire(s, _live_topic(s, topic_id), now)
+        for row in rows:
             row.needs_topic = True
-            rehoming += 1
-        for row in s.exec(select(Outline).where(Outline.topic_override_id == topic_id)).all():
-            row.topic_override_id = None
-            row.moved_at = None
-        for k, v in _cleared_brief().items():
-            setattr(t, k, v)
-        t.dissolved_at = now
-        t.updated_at = now
-    return Dissolved(rehoming=rehoming)
+    return Dissolved(rehoming=len(rows))
+
+
+def _retire(s: Session, t: Topic, now: datetime) -> list[Outline]:
+    """The caller decides which of the returned outlines the organizer sorts again."""
+    rows = list(s.exec(select(Outline).where(Outline.topic_id == t.id)).all())
+    for row in rows:
+        row.topic_id = None
+    for row in s.exec(select(Outline).where(Outline.topic_override_id == t.id)).all():
+        row.topic_override_id = None
+        row.moved_at = None
+    for k, v in _cleared_brief().items():
+        setattr(t, k, v)
+    t.dissolved_at = now
+    t.updated_at = now
+    return rows
+
+
+def _proposed_name(name: str, description: str) -> ProposedTopic:
+    new = model.proposed(name, description)
+    if new is None:
+        raise Conflict("A topic name needs a letter or a digit.")
+    return new
+
+
+def create_topic(name: str, description: str, sort_posts: bool, llm: LLM | None, now: datetime) -> TopicCreated:
+    new = _proposed_name(name, description)
+    with db.write_session() as s:
+        holder = s.exec(select(Topic).where(Topic.slug == new.slug)).first()
+        if _is_live(holder):
+            raise Conflict(f'"{holder.name}" is already a topic.')
+        if s.exec(select(func.count()).select_from(Topic).where(_live())).one() >= MAX_TOPICS:
+            raise Conflict(f"Sift keeps at most {MAX_TOPICS} topics. Merge or remove one first.")
+        if holder is not None:
+            _free_tombstone_slug(holder)
+            s.flush()
+        topic_id = _create(s, new, now).id
+    assert topic_id is not None
+    not_moved = None
+    if sort_posts and llm is None:
+        not_moved = "No LLM is configured, so no posts were moved."
+    elif sort_posts and llm is not None:
+        try:
+            _fit(topic_id, new, llm)
+        except ProcessingError as e:
+            not_moved = f"Posts were not moved: {e.message}"
+        except Exception:
+            log.exception("moving posts onto new topic %s failed", topic_id)
+            not_moved = "Posts were not moved: something went wrong while sorting them."
+    return TopicCreated(topic=_detail(topic_id), not_moved=not_moved)
+
+
+def _fit(topic_id: int, new: ProposedTopic, llm: LLM) -> None:
+    with db.read_session() as s:
+        offered = _offered(s, col(Outline.topic_override_id).is_(None))
+    if not offered.posts:
+        return
+    draft, _ = llm.fit_topic(TopicFitInput(topic=new.name, description=new.description, posts=offered.posts))
+    picks = model.normalize_fit(draft, [p.id for p in offered.posts])
+    if not picks:
+        return
+    with db.write_session() as s:
+        if not _is_live(s.get(Topic, topic_id)):
+            return
+        for row in s.exec(_member_outlines(col(Outline.item_id).in_(picks), col(Outline.topic_override_id).is_(None))):
+            row.topic_id = topic_id
+            row.needs_topic = False
+
+
+def _member_outlines(*where: ColumnElement[bool]) -> SelectOfScalar[Outline]:
+    return select(Outline).join(Item, filed_outline()).where(col(Item.status).in_(MEMBER_STATUSES), *where)
+
+
+@dataclass(frozen=True, slots=True)
+class _Offered:
+    posts: list[RebuildPostIn]
+    refs: dict[int, ItemRef]
+    pinned: dict[int, int]
+
+
+def _offered(s: Session, *where: ColumnElement[bool]) -> _Offered:
+    live = {t.id: t for t in _live_topics(s)}
+    rows = s.exec(
+        select(Outline, Item.item_type, Item.summary)
+        .join(Item, filed_outline())
+        .where(col(Item.status).in_(MEMBER_STATUSES), *where)
+        .order_by(col(Item.received_at).desc(), col(Item.id).desc())
+        .limit(REBUILD_MAX_POSTS)
+    ).all()
+    refs = _item_refs(s, (o.item_id for o, _, _ in rows))
+    posts: list[RebuildPostIn] = []
+    pinned: dict[int, int] = {}
+    for o, item_type, summary in rows:
+        topic = live.get(topic_of(o))
+        posts.append(
+            RebuildPostIn(
+                id=o.item_id,
+                title=refs[o.item_id].title,
+                item_type=ItemType(item_type or ItemType.other),
+                gist=o.gist or model.cut(summary or "", model.GIST_MAX),
+                labels=list(o.labels),
+                topic=topic.name if topic else None,
+                moved_by_hand=o.topic_override_id is not None,
+            )
+        )
+        if o.topic_override_id is not None:
+            pinned[o.item_id] = o.topic_override_id
+    return _Offered(posts, refs, pinned)
+
+
+def draft_rebuild(llm: LLM) -> RebuildPlan:
+    with db.read_session() as s:
+        offered = _offered(s)
+        live = _live_topics(s)
+        sizes = _topic_counts(s, MEMBER_STATUSES)
+    if len(offered.posts) < REBUILD_MIN_POSTS:
+        raise Conflict(f"Keep at least {REBUILD_MIN_POSTS} posts before rebuilding topics.")
+    _, active = goals.scoring_context()
+    topics = {t.id: t for t in live if t.id is not None}
+    inp = TopicRebuildInput(
+        goals=active,
+        topics=[
+            RebuildTopicIn(id=tid, name=t.name, description=t.description, posts=sizes.get(tid, 0))
+            for tid, t in topics.items()
+        ],
+        posts=offered.posts,
+    )
+    draft, _ = llm.rebuild_topics(inp)
+    plan = model.normalize_rebuild(draft, list(topics), [p.id for p in offered.posts], offered.pinned)
+    return RebuildPlan(
+        topics=[
+            PlannedTopic(
+                name=t.topic.name,
+                description=t.topic.description,
+                continues=[_ref(topics[i]) for i in t.continues],
+                posts=[offered.refs[i] for i in t.posts],
+            )
+            for t in plan.topics
+        ],
+        unsorted=[offered.refs[i] for i in plan.unsorted],
+        retiring=[_ref(topics[i]) for i in plan.retiring],
+    )
+
+
+def apply_rebuild(body: RebuildApply, now: datetime) -> TopicsView:
+    planned = body.topics
+    proposals = [_proposed_name(p.name, p.description) for p in planned]
+    if dup := _repeated(p.slug for p in proposals):
+        name = next(p.name for p in proposals if p.slug == dup)
+        raise Conflict(f'Two topics are named "{name}". Rename one.')
+    if _repeated([*(tid for p in planned for tid in p.continues), *set(body.retire)]) is not None:
+        raise Conflict("A current topic can carry on into only one new topic.")
+    post_ids = [pid for p in planned for pid in p.posts]
+    if _repeated(post_ids) is not None:
+        raise Conflict("A post can go on only one topic.")
+    with db.write_session() as s:
+        live = {t.id: t for t in _live_topics(s) if t.id is not None}
+        if any(tid not in live for p in planned for tid in p.continues):
+            raise NotFound("Topic not found")
+        placed = {o.item_id: o for o in s.exec(_member_outlines(col(Outline.item_id).in_(post_ids))).all()}
+        resort = s.exec(
+            _member_outlines(col(Outline.item_id).in_(body.resort), col(Outline.topic_override_id).is_(None))
+        ).all()
+        sizes = _topic_counts(s, MEMBER_STATUSES)
+        bases = [
+            max((live[tid] for tid in p.continues), key=lambda t: (sizes.get(t.id or 0, 0), -(t.id or 0)), default=None)
+            for p in planned
+        ]
+        keeps_slug = {b.id for b, new in zip(bases, proposals, strict=True) if b is not None and b.slug == new.slug}
+        changing = {tid for p in planned for tid in p.continues} | set(body.retire)
+        for holder in s.exec(select(Topic).where(col(Topic.slug).in_({p.slug for p in proposals}))).all():
+            if holder.id in live and holder.id not in changing:
+                raise Conflict(f'"{holder.name}" is already a topic. Carry it on or remove it first.')
+            if holder.id not in keeps_slug:
+                _free_tombstone_slug(holder)
+        s.flush()
+
+        topic_of_post: dict[int, int] = {}
+        for p, new, base in zip(planned, proposals, bases, strict=True):
+            if base is None:
+                t = _create(s, new, now)
+            else:
+                base.name, base.slug, base.description, base.updated_at = new.name, new.slug, new.description, now
+                for tid in p.continues:
+                    if tid != base.id:
+                        _merge(s, live[tid], base, now)
+                t = base
+            assert t.id is not None
+            topic_of_post |= dict.fromkeys(p.posts, t.id)
+        retired = [row for tid in set(body.retire) if tid in live for row in _retire(s, live[tid], now)]
+        unplaced = [r.item_id for r in retired if r.item_id not in topic_of_post]
+        for row in s.exec(_member_outlines(col(Outline.item_id).in_(unplaced))).all():
+            row.needs_topic = True
+        for row in resort:
+            if row.item_id not in topic_of_post:
+                row.topic_id, row.needs_topic = None, True
+        for pid, tid in topic_of_post.items():
+            if pid in placed:
+                placed[pid].topic_id, placed[pid].needs_topic = tid, False
+    return list_topics()
+
+
+def _repeated[T](values: Iterable[T]) -> T | None:
+    seen: set[T] = set()
+    for v in values:
+        if v in seen:
+            return v
+        seen.add(v)
+    return None
 
 
 def move_item(item_id: int, topic_id: int | None, now: datetime) -> ItemOrganization:
@@ -1013,8 +1283,8 @@ def move_item(item_id: int, topic_id: int | None, now: datetime) -> ItemOrganiza
         item = s.get(Item, item_id)
         if item is None:
             raise NotFound("Item not found")
-        row = s.get(Outline, item_id)
-        if row is None or row.extracted_at != item.extracted_at:
+        row = filed_outline_of(s, item)
+        if row is None:
             raise Conflict("This post is not organized yet.")
         if topic_id is None:
             row.topic_override_id = None

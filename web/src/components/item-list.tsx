@@ -4,18 +4,20 @@ import { AnimatePresence, motion } from "motion/react";
 import { type CSSProperties, type JSX, type ReactNode, useId, useState } from "react";
 import { toast } from "sonner";
 import { type Item, useItemAction, useStatus } from "@/api";
+import { ShopLink } from "@/components/card-body";
 import { ScoreRail, ThresholdLine } from "@/components/score-rail";
 import { type MoveItem, useItemDrag, useMoveItem } from "@/components/shelf";
 import { StageAxis, StageTrack } from "@/components/stage-track";
 import { SwipeRow } from "@/components/swipe-row";
 import { Thumb } from "@/components/thumb";
 import { Button } from "@/components/ui/button";
+import { Tag } from "@/components/ui/tag";
 import { groupFolds } from "@/lib/folds";
 import { formatAgo } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { cn, httpLink } from "@/lib/utils";
 import { ACTIONS, IMPORTED_LABEL, SOURCES, TYPES } from "@/lib/vocabulary";
 
-export type ListVariant = "inbox" | "library";
+export type ListVariant = "inbox" | "library" | "wishlist";
 
 export function ItemList({
   items,
@@ -48,7 +50,7 @@ export function ItemList({
                 transition={{ duration: 0.22, ease: "easeOut" }}
               >
                 <SwipeRow item={row} move={move}>
-                  {variant === "library" ? <LibraryRow item={row} /> : <InboxRow item={row} />}
+                  <Row item={row} variant={variant} />
                 </SwipeRow>
                 {under.length > 0 && <Folded covered={under} move={move} />}
               </motion.li>
@@ -61,12 +63,30 @@ export function ItemList({
   );
 }
 
+function Row({ item, variant }: { item: Item; variant: ListVariant }): JSX.Element {
+  switch (variant) {
+    case "inbox":
+      return <InboxRow item={item} />;
+    case "library":
+      return <LibraryRow item={item} />;
+    case "wishlist":
+      return <WishlistRow item={item} />;
+  }
+}
+
 const rowClass =
   "grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3.5 py-3 pr-(--rail-end) pl-4 outline-offset-[-2px] hover:bg-hover active:bg-hover";
 
-function LibraryRow({ item, covered }: { item: Item; covered?: boolean }): JSX.Element {
+function DragRowLink({
+  item,
+  className,
+  children,
+}: {
+  item: Item;
+  className?: string | false;
+  children: ReactNode;
+}): JSX.Element {
   const drag = useItemDrag(item);
-  const { threshold } = useStatus();
   return (
     <Link
       ref={drag.ref}
@@ -75,17 +95,52 @@ function LibraryRow({ item, covered }: { item: Item; covered?: boolean }): JSX.E
       to="/items/$itemId"
       params={{ itemId: item.id }}
       draggable={false}
-      className={cn(
-        rowClass,
-        "bg-sheet",
-        covered && "grid-cols-[28px_minmax(0,1fr)_auto] py-2.5 pl-14 max-[700px]:pl-10",
-        drag.isDragging && "opacity-50",
-      )}
+      className={cn(rowClass, "bg-sheet", className, drag.isDragging && "opacity-50")}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function LibraryRow({ item, covered }: { item: Item; covered?: boolean }): JSX.Element {
+  const { threshold } = useStatus();
+  return (
+    <DragRowLink
+      item={item}
+      className={covered && "grid-cols-[28px_minmax(0,1fr)_auto] py-2.5 pl-14 max-[700px]:pl-10"}
     >
       <Thumb url={item.thumbnail_url} size={covered ? 28 : 40} placeholder={SOURCES[item.source].monogram} />
       {covered ? <CoveredText item={item} /> : <RowText item={item} />}
       <ScoreRail item={item} threshold={threshold} />
-    </Link>
+    </DragRowLink>
+  );
+}
+
+function WishlistRow({ item }: { item: Item }): JSX.Element {
+  const { product } = item;
+  const name = product?.name ?? item.display_title;
+  const link = httpLink(product?.link);
+  return (
+    <>
+      <DragRowLink item={item} className={link ? "pr-[104px]" : undefined}>
+        <Thumb url={item.thumbnail_url} placeholder={SOURCES[item.source].monogram} />
+        <div className="min-w-0">
+          <div className="truncate font-semibold">{name}</div>
+          <div className="mt-0.5 flex min-w-0 items-center gap-2.5 text-caption text-silt">
+            {product?.price && <span className="shrink-0 font-mono text-graphite">{product.price}</span>}
+            <span className="truncate">{item.gist ?? item.summary}</span>
+          </div>
+        </div>
+        <span />
+      </DragRowLink>
+      {link && (
+        <ShopLink
+          href={link}
+          name={name}
+          className="absolute top-1/2 right-5 -translate-y-1/2 max-[700px]:right-3 max-[700px]:py-3"
+        />
+      )}
+    </>
   );
 }
 
@@ -168,11 +223,7 @@ function RowText({ item, imported }: { item: Item; imported?: boolean }): JSX.El
   return (
     <div className="min-w-0">
       <div className="truncate font-semibold max-[700px]:line-clamp-2 max-[700px]:whitespace-normal max-[700px]:leading-[18px]">
-        {imported && (
-          <span className="mr-2 rounded-[5px] border border-mesh px-1.5 py-px align-[1px] font-mono font-normal text-micro text-silt">
-            {IMPORTED_LABEL}
-          </span>
-        )}
+        {imported && <Tag className="mr-2 align-[1px] font-normal">{IMPORTED_LABEL}</Tag>}
         {item.display_title}
       </div>
       {item.status === "failed" ? (

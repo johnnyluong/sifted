@@ -11,6 +11,7 @@ from sift.sources.base import Fetcher
 class Fetchers:
     instagram: Fetcher
     threads: Fetcher
+    image: Fetcher
 
     def for_source(self, source: Source) -> Fetcher:
         match source:
@@ -18,6 +19,8 @@ class Fetchers:
                 return self.instagram
             case Source.threads:
                 return self.threads
+            case Source.image:
+                return self.image
             case _:
                 assert_never(source)
 

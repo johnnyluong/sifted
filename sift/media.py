@@ -5,7 +5,7 @@ import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from sift.domain import FailureKind, MediaKind, ProcessingError
 
@@ -16,6 +16,13 @@ MAX_FRAMES = 8
 MAX_IMAGES = 12
 FRAME_LONG_EDGE = 768
 SLIDE_LONG_EDGE = 1024
+# Screenshots are text, so their tiles go up to the model's 1568px long-edge limit.
+SCREENSHOT_LONG_EDGE = 1568
+_ON_WHITE = "split[a][b];[a]drawbox=t=fill:c=white,format=rgb24[bg];[bg][b]overlay=format=auto,format=rgb24"
+
+ImageFormat = Literal["png", "jpg", "webp", "gif", "heif"]
+
+_HEIF_BRANDS = frozenset({b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1", b"msf1"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +44,20 @@ class MlxWhisperTranscriber:
 
         result = mlx_whisper.transcribe(str(media), path_or_hf_repo=self._model)
         return str(result.get("text", "")).strip()
+
+
+def image_format(data: bytes) -> ImageFormat | None:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if data[4:8] == b"ftyp" and data[8:12] in _HEIF_BRANDS:
+        return "heif"
+    return None
 
 
 def frame_timestamps(duration_s: float) -> list[float]:
@@ -69,13 +90,49 @@ def probe(video: Path) -> tuple[float, bool]:
     return duration, has_audio
 
 
-def _fit(edge: int) -> str:
+def image_size(image: Path) -> tuple[int, int]:
+    proc = _run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "json",
+            str(image),
+        ]
+    )
+    [stream, *_] = json.loads(proc.stdout or "{}").get("streams") or [{}]
+    width, height = stream.get("width"), stream.get("height")
+    if not width or not height:
+        raise ProcessingError(FailureKind.unsupported_url, f"{image.name} holds no picture.", retryable=False)
+    return int(width), int(height)
+
+
+def fit(edge: int) -> str:
     return f"scale='if(gt(iw,ih),min(iw,{edge}),-2)':'if(gt(iw,ih),-2,min(ih,{edge}))'"
+
+
+def upright(image: Path, out: Path) -> Path:
+    # ffmpeg rotates by EXIF on decode, so the tiles are measured on this copy; JPEG would turn transparency black.
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _run(["ffmpeg", "-y", "-v", "error", "-i", str(image), "-frames:v", "1", "-filter_complex", _ON_WHITE, str(out)])
+    return out
+
+
+def write_jpeg(image: Path, out: Path, vf: str, quality: int = 4) -> Path:
+    # Always JPEG: ffmpeg built without libwebp cannot write WebP, and a GIF sends only its first frame.
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _run(["ffmpeg", "-y", "-v", "error", "-i", str(image), "-frames:v", "1", "-vf", vf, "-q:v", str(quality), str(out)])
+    return out
 
 
 def extract_frames(video: Path, duration_s: float, out_dir: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    scale = _fit(FRAME_LONG_EDGE)
+    scale = fit(FRAME_LONG_EDGE)
     frames: list[Path] = []
     for i, t in enumerate(frame_timestamps(duration_s)):
         path = out_dir / f"frame_{i:02d}.jpg"
@@ -103,15 +160,12 @@ def extract_frames(video: Path, duration_s: float, out_dir: Path) -> list[Path]:
     return frames
 
 
-def shrink_slides(slides: list[Path], out_dir: Path) -> list[Path]:
+def shrink_slides(slides: list[Path], out_dir: Path, long_edge: int = SLIDE_LONG_EDGE) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     out: list[Path] = []
     for slide in slides:
-        path = out_dir / slide.name
         try:
-            _run(
-                ["ffmpeg", "-y", "-v", "error", "-i", str(slide), "-vf", _fit(SLIDE_LONG_EDGE), "-q:v", "4", str(path)]
-            )
+            path = write_jpeg(slide, out_dir / f"{slide.stem}.jpg", fit(long_edge))
         except ProcessingError as e:
             if not e.retryable:
                 raise
@@ -128,6 +182,7 @@ def process_media(
     slides: list[Path],
     workdir: Path,
     transcriber: Transcriber,
+    slide_edge: int = SLIDE_LONG_EDGE,
 ) -> MediaResult:
     match kind:
         case MediaKind.video:
@@ -141,8 +196,10 @@ def process_media(
                 ) from e
             frames = extract_frames(video, duration, workdir / "frames")
             room = max(0, MAX_IMAGES - len(frames))
-            return MediaResult(transcript, frames + shrink_slides(slides[:room], workdir / "frames"))
+            return MediaResult(transcript, frames + shrink_slides(slides[:room], workdir / "frames", slide_edge))
         case MediaKind.image:
-            return MediaResult(None, shrink_slides(slides, workdir / "frames") or ([thumbnail] if thumbnail else []))
+            return MediaResult(
+                None, shrink_slides(slides, workdir / "frames", slide_edge) or ([thumbnail] if thumbnail else [])
+            )
         case MediaKind.text:
             return MediaResult(None, [])

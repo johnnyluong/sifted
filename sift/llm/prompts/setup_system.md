@@ -19,4 +19,5 @@ Rules:
 - deactivate: the id of a current goal the answers contradict, or of one that duplicates another current goal. Never put a goal you revise there. A current goal the answers do not mention stays.
 - category: personal is life, food, places, health and people; professional is a job or career skill; entrepreneurial is their own business or product; other is the rest.
 - values_text: 3 to 6 short lines in their voice: what they care about, what counts as noise, who they plan things with (friends and a partner call for different places), and how strict Sift should be. Keep the current values that still hold.
-- Use only what the answers, the current goals and the current values say.
+- kept_anyway, when given, lists posts Sift would have archived that they kept, with their reason. A post kept for a current goal shows that goal is wider than its description: revise it so posts like that one fit. Two or more posts that fit none of their goals and share a theme point to a goal they have not named; one post alone never makes a goal. The answers outrank these.
+- Use only what the answers, the current goals, the current values and the kept posts say.

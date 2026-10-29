@@ -20,7 +20,8 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const handler = routes.get(key);
   if (!handler) return Response.json({ detail: `no fake for ${key}` }, { status: 404 });
   try {
-    return Response.json(await handler(request));
+    const out = await handler(request);
+    return out instanceof Response ? out : Response.json(out);
   } catch (error) {
     const { status = 500, detail = String(error) } = error as { status?: number; detail?: string };
     return Response.json({ detail }, { status });

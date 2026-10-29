@@ -1,7 +1,8 @@
 import type { Item, UserAction } from "@/api";
 
 export type SwipeSide = "right" | "left";
-export type SwipeActions = Partial<Record<SwipeSide, UserAction>>;
+export type SwipeAction = UserAction | "delete";
+export type SwipeActions = Partial<Record<SwipeSide, SwipeAction>>;
 export type Axis = "x" | "y";
 
 const RIGHT_ACTIONS: readonly UserAction[] = ["keep", "done", "undone"];
@@ -13,11 +14,9 @@ export function isMousePointer(event: { pointerType: string }): boolean {
   return event.pointerType === "mouse";
 }
 
-export function swipeActions(item: Pick<Item, "actions">): SwipeActions {
-  return {
-    right: RIGHT_ACTIONS.find((a) => item.actions.includes(a)),
-    left: item.actions.includes("archive") ? "archive" : undefined,
-  };
+export function swipeActions(item: Pick<Item, "actions" | "can_delete">): SwipeActions {
+  const left = item.actions.includes("archive") ? "archive" : item.can_delete ? "delete" : undefined;
+  return { right: RIGHT_ACTIONS.find((a) => item.actions.includes(a)), left };
 }
 
 export function sideOf(dx: number): SwipeSide {
@@ -38,7 +37,7 @@ export function swipeOffset(dx: number, width: number, actions: SwipeActions): n
   return Math.sign(dx) * Math.min(width, Math.abs(dx));
 }
 
-export function swipeResult(dx: number, width: number, actions: SwipeActions): UserAction | null {
+export function swipeResult(dx: number, width: number, actions: SwipeActions): SwipeAction | null {
   if (Math.abs(dx) < commitDistance(width)) return null;
   return actions[sideOf(dx)] ?? null;
 }

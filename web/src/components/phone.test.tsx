@@ -94,6 +94,9 @@ describe("swiping a list row", () => {
   const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
   beforeAll(() => Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get: () => 390 }));
   afterAll(() => width && Object.defineProperty(HTMLElement.prototype, "offsetWidth", width));
+  afterEach(() => {
+    toast.dismiss();
+  });
 
   it("archives a Kept row on a long left swipe by touch, without opening it", async () => {
     const router = renderAt("/kept");
@@ -130,6 +133,22 @@ describe("swiping a list row", () => {
     drag(link, "touch", -160);
     await userEvent.click(await screen.findByRole("button", { name: "Undo" }));
     await waitFor(() => expect(callCount("POST /api/items/1/actions/keep")).toBe(1));
+  });
+
+  it("puts an archived wishlist row back on the wishlist on Undo, not on Kept", async () => {
+    const onWishlist = item({ wishlist: true, state_label: "On wishlist", actions: ["archive", "done", "reprocess"] });
+    renderAt("/wishlist", [onWishlist]);
+    route(ARCHIVE, () => item({ status: "archived", actions: ["keep", "done", "reprocess"] }));
+    const bodies: unknown[] = [];
+    route("PUT /api/items/1/wishlist", async (request) => {
+      bodies.push(await request.json());
+      return { ...onWishlist, can_wishlist: true, wishlist_override: true };
+    });
+    const { link } = await findRow();
+    drag(link, "touch", -160);
+    await userEvent.click(await screen.findByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(bodies).toEqual([{ on: true }]));
+    expect(callCount("POST /api/items/1/actions/keep")).toBe(0);
   });
 
   it("offers Reprocess, not Undo, after archiving a failed Inbox row, since nothing returns it to failed", async () => {
@@ -291,7 +310,7 @@ describe("the phone Add sheet", () => {
     const onFocus = (event: FocusEvent) => focused.push((event.target as Element).getAttribute("aria-label"));
     document.addEventListener("focusin", onFocus);
     await userEvent.click(await screen.findByRole("button", { name: "Add a link" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Paste link from clipboard" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Paste link or screenshot" }));
     await waitFor(() => expect(sent).toEqual(["https://www.instagram.com/reel/ABC/"]));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     document.removeEventListener("focusin", onFocus);
@@ -303,7 +322,7 @@ describe("the phone Add sheet", () => {
     renderAt("/kept");
     await userEvent.click(await screen.findByRole("button", { name: "Add a link" }));
     const field = await screen.findByRole("textbox", { name: "Link to add" });
-    expect(screen.queryByRole("button", { name: "Paste link from clipboard" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Paste link or screenshot" })).toBeNull();
     expect(document.activeElement).toBe(field);
   });
 
@@ -315,7 +334,7 @@ describe("the phone Add sheet", () => {
     });
     renderAt("/kept");
     await userEvent.click(await screen.findByRole("button", { name: "Add a link" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Paste link from clipboard" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Paste link or screenshot" }));
     const field = screen.getByRole("textbox", { name: "Link to add" });
     expect(document.activeElement).not.toBe(field);
     answer("");

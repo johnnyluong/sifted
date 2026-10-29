@@ -74,6 +74,11 @@ class ProductDetails(_Strict):
     what_it_is: Para
     price: Short | None
     link: Para | None
+    wishlist: bool = Field(
+        description="True when it is something I might buy for myself: a physical product, clothing, gear, "
+        "home goods, a ticketed or paid event, a paid app or course. False for free software, open-source "
+        "repos and services to research."
+    )
 
 
 class OtherDetails(_Strict):
@@ -191,6 +196,7 @@ class OverrideExample(_Strict):
     summary: Para
     system_decision: Decision
     user_decision: Decision
+    reason: Para = ""
 
 
 class ScoreInput(_Strict):
@@ -208,7 +214,7 @@ class DigestItemBrief(_Strict):
     summary: Para
     next_action: Line | None
     goal_id: int | None
-    relevance_score: int
+    relevance_score: int | None
     status: Literal["new", "carryover"]
 
 
@@ -244,7 +250,9 @@ class OutlineInput(_Strict):
 
 
 class NewTopic(_Strict):
-    name: Short = Field(description="1 to 3 words, the shelf a person would name, e.g. 'SEO', 'NYC date spots'.")
+    name: Short = Field(
+        description="1 to 3 words, the shelf a person would name, e.g. 'Marketing and growth', 'NYC outings'."
+    )
     description: Line = Field(description="One sentence: what belongs here.")
 
 
@@ -323,16 +331,66 @@ class TopicPlanDraft(_Strict):
     merges: list[TopicMergeDraft] = Field(description="Existing topics that are the same shelf; at most two.")
 
 
+class RebuildPostIn(_Strict):
+    id: int
+    title: Short
+    item_type: ItemType
+    gist: Line
+    labels: list[Short]
+    topic: Short | None = Field(description="The topic it sits on now, or null.")
+    moved_by_hand: bool = Field(description="The person put it on its topic themselves.")
+
+
+class RebuildTopicIn(_Strict):
+    id: int
+    name: Short
+    description: Line
+    posts: int
+
+
+class TopicRebuildInput(_Strict):
+    goals: list[GoalBrief]
+    topics: list[RebuildTopicIn]
+    posts: list[RebuildPostIn]
+
+
+class RebuiltTopicDraft(_Strict):
+    name: Short = Field(description="1 to 3 plain words, the shelf a person would name, e.g. 'Marketing and growth'.")
+    description: Line = Field(description="One sentence: what belongs here.")
+    continues: list[int] = Field(description="ids of current topics this one keeps or absorbs; empty for a new shelf.")
+    posts: list[int] = Field(description="ids of the posts placed on this topic.")
+
+
+class TopicRebuildDraft(_Strict):
+    topics: list[RebuiltTopicDraft]
+
+
+class TopicFitInput(_Strict):
+    topic: Short
+    description: Line
+    posts: list[RebuildPostIn]
+
+
+class TopicFitDraft(_Strict):
+    posts: list[int] = Field(description="ids of the posts that belong on the new topic more than where they are.")
+
+
 class SetupAnswerIn(_Strict):
     id: Short
     question: Line
     answer: Para = Field(description="The free answer, or the picked choice labels joined by '; '.")
 
 
+class KeptAnyway(_Strict):
+    title: Short
+    reason: Para
+
+
 class SetupInput(_Strict):
     answers: list[SetupAnswerIn]
     current_goals: list[GoalBrief]
     current_values: Body
+    kept_anyway: list[KeptAnyway] = []
 
 
 class ProposedGoal(_Strict):

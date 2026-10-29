@@ -6,7 +6,7 @@ import {
   useDraggable,
   useDroppable,
 } from "@dnd-kit/react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { type JSX, type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -18,12 +18,13 @@ import {
   type UserAction,
   useItemAction,
   useSetItemTopic,
+  useSetWishlist,
 } from "@/api";
 import { Thumb } from "@/components/thumb";
 import type { Shelf } from "@/lib/nav";
 import { isMousePointer } from "@/lib/swipe";
 import { cn } from "@/lib/utils";
-import { ACTIONS, SOURCES, TYPES } from "@/lib/vocabulary";
+import { ACTIONS, actionWords, SOURCES, TYPES } from "@/lib/vocabulary";
 
 export type DropTarget = { kind: "shelf"; shelf: Shelf } | { kind: "topic"; topic: TopicRef };
 
@@ -89,14 +90,25 @@ export type MoveItem = (item: Item, action: UserAction) => Promise<ItemDetail | 
 // Per-call mutate callbacks fire only for a hook's latest call, so each move awaits its own promise.
 export function useMoveItem(): MoveItem {
   const act = useItemAction();
+  const setWishlist = useSetWishlist();
+  const navigate = useNavigate();
+  const undoMove = (item: Item, action: UserAction, after: ItemDetail) => {
+    // Archive clears a hand add, so Keep would land the post on Kept instead of back on the wishlist.
+    if (action === "archive" && item.wishlist) {
+      return { label: "Undo", onClick: () => setWishlist.mutate({ id: item.id, on: true }) };
+    }
+    const undo = undoFor(item.status, after);
+    return undo ? { label: undo.label, onClick: () => act.mutate({ id: item.id, action: undo.action }) } : undefined;
+  };
   return async (item, action) => {
     try {
       const after = await act.mutateAsync({ id: item.id, action });
-      const undo = undoFor(item.status, after);
-      toast(`${ACTIONS[action].done}: ${item.display_title}`, {
-        action: undo
-          ? { label: undo.label, onClick: () => act.mutate({ id: item.id, action: undo.action }) }
-          : undefined,
+      toast(`${actionWords(action, item).done}: ${item.display_title}`, {
+        action: undoMove(item, action, after),
+        cancel:
+          action === "keep" && after.asks_keep_reason
+            ? { label: "Say why", onClick: () => void navigate({ to: "/items/$itemId", params: { itemId: item.id } }) }
+            : undefined,
       });
       return after;
     } catch {

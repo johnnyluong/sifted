@@ -7,6 +7,7 @@ from typing import ClassVar
 from sift.domain import MediaKind, Notes, ProcessingError, Source, SourceRef
 from sift.sources import Fetchers
 from sift.sources.base import FetchResult
+from sift.sources.image import ImageFetcher
 
 
 class FakeFetcher:
@@ -69,9 +70,9 @@ class FakeTranscriber:
         return self.text
 
 
-def fake_fetchers(fetcher: FakeFetcher | None = None) -> Fetchers:
+def fake_fetchers(uploads_dir: Path, fetcher: FakeFetcher | None = None) -> Fetchers:
     f = fetcher or FakeFetcher()
-    return Fetchers(instagram=f, threads=f)
+    return Fetchers(instagram=f, threads=f, image=ImageFetcher(uploads_dir))
 
 
 def no_media_tools(monkeypatch_setattr: Callable[..., None]) -> None:

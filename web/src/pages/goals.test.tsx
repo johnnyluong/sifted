@@ -13,6 +13,7 @@ function renderGoals() {
   route("GET /api/status", () => status());
   route("GET /api/goals", () => []);
   route("GET /api/values", () => ({ values_text: "" }));
+  route("GET /api/setup", () => ({ questions: [], answers: [], setup_at: null, kept_anyway: [], kept_since_setup: 0 }));
   const queryClient = createQueryClient();
   render(
     <QueryClientProvider client={queryClient}>

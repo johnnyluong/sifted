@@ -12,8 +12,11 @@ from sift.llm.schemas import (
     BriefSectionDraft,
     NewTopic,
     OutlineDraft,
+    RebuiltTopicDraft,
+    TopicFitDraft,
     TopicMergeDraft,
     TopicPlanDraft,
+    TopicRebuildDraft,
 )
 from sift.organize import model
 from sift.organize.model import (
@@ -235,3 +238,45 @@ def test_plan_merges_run_smaller_into_larger_skip_dismissed_and_never_chain() ->
 def test_a_dismissal_holds_after_the_sizes_flip_the_pair() -> None:
     d = TopicPlanDraft(new_topics=[], merges=[TopicMergeDraft(from_id=7, into_id=6)])
     assert model.normalize_plan(d, {6: 1, 7: 2}, dismissed={frozenset((7, 6))}).merges == ()
+
+
+def rebuilt(name: str, continues: list[int], posts: list[int]) -> RebuiltTopicDraft:
+    return RebuiltTopicDraft(name=name, description=f"{name} posts.", continues=continues, posts=posts)
+
+
+def test_a_rebuild_folds_repeated_names_and_keeps_only_offered_ids_once() -> None:
+    d = TopicRebuildDraft(
+        topics=[
+            rebuilt("App building", [1, 99], [10, 11, 77]),
+            rebuilt("Marketing", [1, 2], [11, 12]),
+            rebuilt("  app BUILDING ", [3], [13]),
+            rebuilt("!!!", [4], [14]),
+            rebuilt("Nothing yet", [], []),
+            rebuilt("Unknown ids", [99], [77]),
+        ]
+    )
+    plan = model.normalize_rebuild(d, topic_ids=[1, 2, 3, 4], post_ids=[10, 11, 12, 13, 14, 15], pinned={})
+    assert [(t.topic.name, t.continues, t.posts) for t in plan.topics] == [
+        ("App building", (1, 3), (10, 11, 13)),
+        ("Marketing", (2,), (12,)),
+    ]
+    assert plan.unsorted == (14, 15)
+    assert plan.retiring == (4,)
+
+
+def test_a_rebuild_keeps_a_post_moved_by_hand_with_the_topic_that_continues_its_pick() -> None:
+    d = TopicRebuildDraft(topics=[rebuilt("Food", [1], [10]), rebuilt("NYC outings", [2], [11])])
+    plan = model.normalize_rebuild(d, topic_ids=[1, 2, 3], post_ids=[10, 11, 12], pinned={10: 2, 12: 3})
+    assert [t.posts for t in plan.topics] == [(), (10, 11)]
+    assert plan.unsorted == (12,)
+
+
+def test_a_rebuild_caps_the_number_of_topics() -> None:
+    d = TopicRebuildDraft(topics=[rebuilt(f"Shelf {i}", [], [i]) for i in range(model.MAX_TOPICS + 3)])
+    plan = model.normalize_rebuild(d, topic_ids=[], post_ids=list(range(model.MAX_TOPICS + 3)), pinned={})
+    assert len(plan.topics) == model.MAX_TOPICS
+    assert plan.unsorted == tuple(range(model.MAX_TOPICS, model.MAX_TOPICS + 3))
+
+
+def test_a_fit_keeps_only_offered_posts_in_their_order() -> None:
+    assert model.normalize_fit(TopicFitDraft(posts=[12, 99, 10, 12]), offered=[10, 11, 12]) == (10, 12)

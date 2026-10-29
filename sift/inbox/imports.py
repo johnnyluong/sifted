@@ -175,7 +175,6 @@ class ImportView(BaseModel):
     files_skipped_budget: list[str] = Field(
         description="Saved files left unread because the scan's total read budget ran out before them."
     )
-    by_source: dict[Source, int]
     unsupported_count: int
     unsupported_sample: list[str]
     counts: ImportCounts
@@ -472,7 +471,6 @@ def _view(s: Session, row: Import, now: datetime, pace: Pace, *, llm_ready: bool
             .where(ImportLink.import_id == row.id, ImportLink.state == LinkState.released)
         ).all()
     )
-    by_source = Counter(s.exec(select(ImportLink.source).where(ImportLink.import_id == row.id)).all())
     ph = phase(row, states[LinkState.waiting])
     hold: Wait | None = None
     current: CurrentPost | None = None
@@ -498,7 +496,6 @@ def _view(s: Session, row: Import, now: datetime, pace: Pace, *, llm_ready: bool
         files_read=row.files_read,
         files_skipped_large=row.files_skipped_large,
         files_skipped_budget=row.files_skipped_budget,
-        by_source={source: by_source.get(source, 0) for source in Source},
         unsupported_count=row.unsupported_count,
         unsupported_sample=row.unsupported,
         counts=ImportCounts(

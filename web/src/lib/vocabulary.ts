@@ -28,6 +28,7 @@ export const TYPES: Record<ItemType, { label: string; icon: LucideIcon }> = {
 export const SOURCES: Record<Source, { label: string; monogram: string }> = {
   instagram: { label: "Instagram", monogram: "IG" },
   threads: { label: "Threads", monogram: "TH" },
+  image: { label: "Image", monogram: "IM" },
 };
 
 export const ACTIONS: Record<UserAction, { label: string; done: string }> = {
@@ -68,6 +69,15 @@ export const NOTICES: Record<Notice, { title: string; body: string; link?: { lab
     link: { label: "Set up goals", to: "/setup" },
   },
 };
+
+const BOUGHT = { label: "Bought", done: "Marked bought" };
+const NOT_BOUGHT = { label: "Not bought", done: "Back on your wishlist" };
+
+export function actionWords(action: UserAction, item: Pick<Item, "wishlist_post">): { label: string; done: string } {
+  if (item.wishlist_post && action === "done") return BOUGHT;
+  if (item.wishlist_post && action === "undone") return NOT_BOUGHT;
+  return ACTIONS[action];
+}
 
 export function primaryAction(item: Pick<Item, "actions" | "status">): UserAction | undefined {
   if (item.actions.includes("retry")) return "retry";

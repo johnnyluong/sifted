@@ -15,6 +15,7 @@ from sift.domain import (
     Hold,
     ImportAction,
     ImportPhase,
+    ItemStatus,
     LinkState,
     Origin,
     PauseReason,
@@ -25,7 +26,7 @@ from sift.domain import (
 from sift.inbox import imports, intake
 from sift.inbox.export import ExportScan, FoundLink
 from sift.inbox.imports import AutoPause, DripState, Pace, Release, Wait
-from sift.items import lifecycle
+from sift.items import lifecycle, store
 from sift.llm import pricing
 from sift.models import ImportLink, Item
 from sift.runtime import Runtime
@@ -83,14 +84,13 @@ def test_preview_counts_dedup_and_prices(rt: Runtime, clock: Clock, settings: Se
         _link("HAVE", 9),
         _link("A", 1),
         _link("B", 2),
-        _link("T1", 3, Source.threads),
+        _link("C", 3),
         unsupported=("https://www.instagram.com/stories/x/1/",),
     )
     view = imports.stage(scan, "meta.zip", clock(), priced, llm_ready=True)
 
     assert view.phase is ImportPhase.preview
     assert (view.counts.links, view.counts.found, view.counts.duplicate) == (4, 3, 1)
-    assert view.by_source == {Source.instagram: 3, Source.threads: 1}
     assert view.unsupported_count == 1
     assert view.per_post.usd == pytest.approx(0.0238 + 0.00083)
     [everything] = view.options
@@ -320,6 +320,33 @@ async def test_the_daily_cap_holds_until_the_oldest_release_is_a_day_old(
     assert _view(rt, clock, pace, import_id).hold is Hold.daily_cap
     clock.now = started + timedelta(hours=24, seconds=1)
     assert isinstance(imports.release_next(clock(), pace, llm_ready=True), Release)
+
+
+async def test_deleting_a_released_post_keeps_it_under_the_daily_cap(
+    rt: Runtime, clock: Clock, settings: Settings, goal: int
+) -> None:
+    pace = _pace(settings, cap=2)
+    import_id = _stage(rt, clock, pace, _link("A", 1), _link("B", 2), _link("C", 3))
+    _start(rt, clock, pace, import_id)
+    started = clock()
+    for _ in range(2):
+        imports.release_next(clock(), pace, llm_ready=True)
+        item_id = _export_items()[-1].id
+        assert item_id is not None
+        await rt.worker.run_item(item_id)
+        clock.advance(seconds=300)
+    first = _export_items()[0]
+    with db.write_session() as s:
+        row = s.get(Item, first.id)
+        assert row is not None
+        row.status = ItemStatus.archived
+    assert first.id is not None
+    store.delete_archived(first.id)
+
+    assert imports.release_next(clock(), pace, llm_ready=True) == Wait(Hold.daily_cap, started + timedelta(hours=24))
+    view = _view(rt, clock, pace, import_id)
+    assert (view.counts.released, view.hold) == (2, Hold.daily_cap)
+    assert len(_export_items()) == 1
 
 
 LOGIN_REQUIRED = "[Instagram] P: You need to log in to access this content"

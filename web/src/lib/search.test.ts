@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseId, parseLibrarySearch } from "@/lib/search";
+import { parseDigestSearch, parseId, parseLibrarySearch } from "@/lib/search";
 
 describe("parseLibrarySearch", () => {
   it("keeps valid filters", () => {
@@ -18,6 +18,14 @@ describe("parseLibrarySearch", () => {
     expect(parseLibrarySearch({ goal: -1 })).toEqual({});
     expect(parseLibrarySearch({ topic: "7", label: " " })).toEqual({});
     expect(parseLibrarySearch({ topic: 0, label: 4 })).toEqual({});
+  });
+});
+
+describe("parseDigestSearch", () => {
+  it("keeps a topic id and drops anything else", () => {
+    expect(parseDigestSearch({ topic: 7 })).toEqual({ topic: 7 });
+    for (const bad of ["7", 0, -2, 1.5, null])
+      expect(parseDigestSearch({ topic: bad }).topic, String(bad)).toBeUndefined();
   });
 });
 

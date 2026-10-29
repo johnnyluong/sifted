@@ -20,7 +20,7 @@ T0 = datetime(2026, 10, 11, 22, 0, tzinfo=UTC)
 def cand(
     i: int,
     *,
-    score: int = 70,
+    score: int | None = 70,
     shown: int = 0,
     since: int = 0,
     decided: datetime | None = None,
@@ -88,6 +88,23 @@ def test_plan_keeps_only_valid_picks_then_queues_new_then_carryovers() -> None:
     assert [e.line for e in p.queue] == [None, None, None, "Summary 4", "Line for two"]
 
 
+def test_an_unscored_post_ranks_after_every_scored_one() -> None:
+    sel = select_items(
+        [
+            cand(1, score=None),
+            cand(2, score=0),
+            cand(3, score=80),
+            cand(4, score=None, shown=1, since=1),
+            cand(5, score=5, shown=1, since=1),
+        ],
+        T0,
+    )
+    assert [c.id for c in sel.new] == [3, 2, 1]
+    assert [c.id for c in sel.carryover] == [5, 4]
+    p = plan(sel, DigestDraft(opening="", top=[], by_goal=[]))
+    assert [e.item_id for e in p.queue if e.role is DigestRole.pick] == [3, 5, 2]
+
+
 def test_plan_without_a_valid_pick_takes_the_top_scores_and_benches_the_rest() -> None:
     sel = select_items([cand(1, score=60), cand(2, score=95), cand(3, shown=1, since=1, score=99), cand(4)], T0)
     p = plan(
@@ -132,6 +149,10 @@ def summary(i: int, status: ItemStatus = ItemStatus.kept, **kw: Any) -> ItemSumm
         "next_attempt_at": None,
         "last_error": None,
         "actions": [],
+        "can_delete": False,
+        "wishlist": False,
+        "wishlist_post": False,
+        "product": None,
         "in_motion": False,
         "gist": None,
         "labels": [],
@@ -239,10 +260,12 @@ def test_to_text_is_plain() -> None:
         top=[digest.DigestPick(item=summary(1, title="[x](https://evil)"), why="w", next_action="n", refill=False)],
         done=[],
         groups=[digest.DigestGroup(kind="goal", heading="Other", lines=[digest.DigestLine(item=summary(2), line="l")])],
+        wishlist=[summary(3, title="Rain jacket")],
         item_ids=[1, 2],
     )
     assert to_text(view) == (
         "A week for tacos.\n\nTo act on this week\n1. [x](https://evil) (#1)\n   w\n   Next: n\n\nOther\n- Item 2 (#2): l"
+        "\n\nOn your wishlist\n- Rain jacket (#3)"
     )
 
 

@@ -1,6 +1,11 @@
-// The API's bounds (sift/goals.py); a field that exceeds one gets a 422, so the UI stops typing first.
 export const GOAL_TITLE_MAX = 120;
 export const GOAL_DESCRIPTION_MAX = 600;
 export const VALUES_MAX = 4000;
 export const ANSWER_MAX = 1000;
 export const SETUP_ADD_MAX = 8;
+export const KEEP_NOTE_MAX = 280;
+export const TOPIC_NAME_MAX = 40;
+export const TOPIC_DESCRIPTION_MAX = 200;
+export const TOPICS_MAX = 40;
+export const IMAGE_SET_MAX = 10;
+export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/heic", "image/heif"];

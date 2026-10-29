@@ -21,6 +21,7 @@ MEMBER_MAX_BYTES = 64 * 1024 * 1024
 SCAN_MAX_BYTES = 256 * 1024 * 1024
 READABLE = frozenset({".json", ".html", ".htm"})
 _TOKEN = re.compile(r"[a-z0-9]+")
+_DM_FOLDERS = frozenset({"messages", "inbox"})
 _EARLIEST = datetime(2010, 1, 1, tzinfo=UTC).timestamp()
 _LATEST = datetime(2100, 1, 1, tzinfo=UTC).timestamp()
 
@@ -48,9 +49,9 @@ class ExportScan:
 def is_saved_member(path: str) -> bool:
     """DM folders are named after the other account, so anything under messages/ or inbox/ is refused
     even when a folder name starts with "saved_"."""
-    p = PurePosixPath(path)
+    p = PurePosixPath(path.lower())
     tokens = set(_TOKEN.findall(path.lower()))
-    return p.suffix.lower() in READABLE and "saved" in tokens and not tokens & {"messages", "inbox"}
+    return p.suffix in READABLE and "saved" in tokens and not tokens & _DM_FOLDERS and "threads" not in p.parts[:-1]
 
 
 def _read_order(path: str) -> int:
@@ -58,7 +59,7 @@ def _read_order(path: str) -> int:
     tokens = set(_TOKEN.findall(path.lower()))
     if "collections" in tokens:
         return 2
-    return 0 if tokens & {"posts", "threads"} else 1
+    return 0 if "posts" in tokens else 1
 
 
 def scan(zip_path: Path | IO[bytes]) -> ExportScan:
@@ -169,8 +170,10 @@ def _timestamp_of(obj: dict[Any, Any]) -> datetime | None:
 def _classify(url: str) -> SourceRef | str | None:
     """A profile is dropped silently: newer exports list each saved post's owner next to it."""
     match urls.parse_url(url):
-        case SourceRef() as ref:
+        case SourceRef(source=Source.instagram) as ref:
             return ref
+        case SourceRef():
+            return None
         case urls.Unsupported(kind=urls.UnsupportedKind.meta_other):
             return url
         case urls.Unsupported():

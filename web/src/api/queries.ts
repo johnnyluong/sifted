@@ -1,10 +1,16 @@
 import { queryOptions } from "@tanstack/react-query";
 import { http, unwrap } from "./client";
-import type { ItemType, Status } from "./types";
+import type { ItemStatus, ItemType, ShelfId, Status } from "./types";
 
-export type ListView = "inbox" | "kept" | "archived";
+export type ListView = ShelfId;
 
-export type ListFilter = { view: ListView; q?: string; goal?: number; type?: ItemType; topic?: number; label?: string };
+export type ListFilter = ({ view: ListView } | { status: readonly ItemStatus[] }) & {
+  q?: string;
+  goal?: number;
+  type?: ItemType;
+  topic?: number;
+  label?: string;
+};
 
 export const BUSY_POLL_MS = 1_500;
 export const IDLE_POLL_MS = 15_000;
@@ -29,7 +35,8 @@ export const api = {
           http.GET("/api/items", {
             params: {
               query: {
-                view: filter.view,
+                view: "view" in filter ? filter.view : undefined,
+                status: "status" in filter ? [...filter.status] : undefined,
                 q: filter.q,
                 goal_id: filter.goal,
                 type: filter.type,
@@ -84,5 +91,11 @@ export const api = {
     queryOptions({
       queryKey: ["digest", id],
       queryFn: () => unwrap(http.GET("/api/digests/{digest_id}", { params: { path: { digest_id: id } } })),
+    }),
+
+  topicDigest: (id: number) =>
+    queryOptions({
+      queryKey: ["topic-digest", id],
+      queryFn: () => unwrap(http.GET("/api/digests/topics/{topic_id}", { params: { path: { topic_id: id } } })),
     }),
 };

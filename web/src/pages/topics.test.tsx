@@ -14,10 +14,10 @@ vi.mock("sonner", () => ({ toast, Toaster: () => null }));
 
 afterEach(() => toast.mockClear());
 
-function renderAt(url: string, rows: Item[] = [item()]) {
+function renderAt(url: string, rows: Item[] | ((request: Request) => Item[]) = [item()]) {
   window.history.replaceState(null, "", url);
   route("GET /api/status", () => status());
-  route("GET /api/items", () => rows);
+  route("GET /api/items", (request) => (typeof rows === "function" ? rows(request) : rows));
   route("GET /api/goals", () => []);
   route("GET /api/topics", () => ({ groups: [], suggestions: [], options: [{ id: 3, name: "NYC restaurants" }] }));
   const queryClient = createQueryClient();
@@ -38,6 +38,49 @@ const covered = item({
   title: "Lucali in 30 seconds",
   display_title: "Lucali in 30 seconds",
   covered_by: { id: 1, title: "Lucali: how to get a table" },
+});
+
+describe("new topic", () => {
+  it("posts the name, description and choice, then opens the topic", async () => {
+    let body: unknown;
+    const created = topicDetail({ id: 7, name: "Marketing and growth", kept: 2 });
+    route("POST /api/topics", async (request) => {
+      body = await request.json();
+      return { topic: created, not_moved: null };
+    });
+    route("GET /api/topics/7", () => created);
+    const router = renderAt("/topics");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "New topic" }));
+    const dialog = await screen.findByRole("dialog", { name: "New topic" });
+    expect(within(dialog).getByRole("checkbox", { name: "Move kept posts that fit" })).toHaveProperty("checked", true);
+    await user.type(within(dialog).getByLabelText("Name"), "  Marketing and growth ");
+    await user.type(within(dialog).getByLabelText("What belongs here"), "Growing my web app.");
+    await user.click(within(dialog).getByRole("button", { name: "Add topic" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/topics/7"));
+    expect(body).toEqual({ name: "Marketing and growth", description: "Growing my web app.", sort_posts: true });
+    expect(toast).toHaveBeenCalledWith("Added Marketing and growth and moved 2 posts to it");
+  });
+
+  it("says when kept posts could not be moved", async () => {
+    let body: unknown;
+    const created = topicDetail({ id: 7, name: "Reading list", kept: 0 });
+    route("POST /api/topics", async (request) => {
+      body = await request.json();
+      return { topic: created, not_moved: "Posts were not moved: Anthropic API: APIConnectionError" };
+    });
+    route("GET /api/topics/7", () => created);
+    const router = renderAt("/topics");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "New topic" }));
+    const dialog = await screen.findByRole("dialog", { name: "New topic" });
+    await user.type(within(dialog).getByLabelText("Name"), "Reading list{Enter}");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/topics/7"));
+    expect(body).toEqual({ name: "Reading list", description: "", sort_posts: true });
+    expect(toast).toHaveBeenCalledWith("Added Reading list. Posts were not moved: Anthropic API: APIConnectionError");
+  });
 });
 
 describe("topic page", () => {
@@ -85,6 +128,19 @@ describe("topic page", () => {
         .getAllByRole("link")
         .map((a) => a.textContent),
     ).toEqual(["All 3", "date night 2"]);
+  });
+
+  it("lists every post in the topic, wishlist ones included, as its counts do", async () => {
+    route("GET /api/topics/3", () => topicDetail());
+    const queries: [string | null, string[], string | null][] = [];
+    const jacket = item({ id: 9, display_title: "Packable rain jacket", wishlist: true, state_label: "On wishlist" });
+    renderAt("/topics/3", (request) => {
+      const params = new URL(request.url).searchParams;
+      queries.push([params.get("view"), params.getAll("status"), params.get("topic_id")]);
+      return [jacket];
+    });
+    expect(await screen.findByRole("link", { name: /Packable rain jacket/ })).toBeTruthy();
+    expect(queries).toEqual([[null, ["kept", "done"], "3"]]);
   });
 });
 

@@ -11,7 +11,7 @@ import { SHELVES } from "@/lib/nav";
 import { primaryAction } from "@/lib/vocabulary";
 import { item } from "@/test/fixtures";
 
-const [, keptShelf, archivedShelf] = SHELVES;
+const [, keptShelf, , archivedShelf] = SHELVES;
 
 describe("railMark", () => {
   it("puts the mark at the score and colors it by status", () => {
@@ -192,7 +192,7 @@ describe("CardBody", () => {
     const product = (link: string): Card => ({
       ...base,
       item_type: "product",
-      details: { name: "Pan", what_it_is: "A pan", price: null, link },
+      details: { name: "Pan", what_it_is: "A pan", price: null, link, wishlist: true },
     });
     const { unmount } = render(<CardBody card={product("javascript:alert(1)")} />);
     expect(screen.queryByRole("link")).toBeNull();

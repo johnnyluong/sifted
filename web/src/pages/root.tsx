@@ -9,12 +9,13 @@ import {
 } from "@tanstack/react-router";
 import type { JSX } from "react";
 import { toast } from "sonner";
-import { ApiError, api, type ItemDetail, useItemAction, usePulse } from "@/api";
+import { ApiError, api, type ItemDetail, usePulse } from "@/api";
 import { SieveMark } from "@/components/brand";
 import { Dock } from "@/components/dock";
-import { AddLinkButton, usePasteAnywhere } from "@/components/paste-box";
-import { ShelfDnd, ShelfLink, sideLinkClass, TopicLink } from "@/components/shelf";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { ImagesProvider } from "@/components/image-set";
+import { AddLinkButton, DropAnywhere, PasteAnywhere, useAnnounce } from "@/components/paste-box";
+import { SettingsMenu } from "@/components/settings-menu";
+import { ShelfDnd, ShelfLink, sideLinkClass, TopicLink, useMoveItem } from "@/components/shelf";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/toaster";
 import { DIGEST, SETTINGS, SHELVES, sidebarTopics, TOPICS } from "@/lib/nav";
@@ -31,47 +32,51 @@ export const rootRoute = createRootRouteWithContext<RouterContext>()({
 
 function RootLayout(): JSX.Element {
   const status = usePulse(useAnnounceSettled());
-  usePasteAnywhere();
+  const announce = useAnnounce();
   return (
     <ShelfDnd>
-      <Dock nav={status.nav}>
-        <div className="grid min-h-dvh grid-cols-[calc(232px+env(safe-area-inset-left))_minmax(0,1fr)] max-[700px]:grid-cols-1">
-          <aside className="sticky top-0 flex h-dvh flex-col border-mesh border-r py-5 pr-3 pl-[calc(12px+env(safe-area-inset-left))] max-[700px]:hidden">
-            <Link to="/" className="flex items-center gap-[9px] px-2.5 pt-1 pb-[22px]">
-              <SieveMark className="size-[18px]" />
-              <span className="font-display font-[620] text-[17px] tracking-[-0.01em]">sift</span>
-            </Link>
-            <nav aria-label="Shelves" className="flex flex-col gap-0.5">
-              <Link to={DIGEST.to} className={sideLinkClass}>
-                <DIGEST.icon aria-hidden className="size-4 text-silt" strokeWidth={1.8} />
-                {DIGEST.label}
+      <ImagesProvider announce={announce}>
+        <Dock nav={status.nav}>
+          <div className="grid min-h-dvh grid-cols-[calc(232px+env(safe-area-inset-left))_minmax(0,1fr)] max-[700px]:grid-cols-1">
+            <aside className="sticky top-0 flex h-dvh flex-col border-mesh border-r py-5 pr-3 pl-[calc(12px+env(safe-area-inset-left))] max-[700px]:hidden">
+              <Link to="/" className="flex items-center gap-[9px] px-2.5 pt-1 pb-[22px]">
+                <SieveMark className="size-[18px]" />
+                <span className="font-display font-[620] text-[17px] tracking-[-0.01em]">sift</span>
               </Link>
-              <Link to={TOPICS.to} activeOptions={{ exact: true }} className={sideLinkClass}>
-                <TOPICS.icon aria-hidden className="size-4 text-silt" strokeWidth={1.8} />
-                <span className="flex-1">{TOPICS.label}</span>
-                <span className="font-mono text-[11.5px] text-silt">{status.nav.topics}</span>
-              </Link>
-              <SideTopics />
-              {SHELVES.map((shelf) => (
-                <ShelfLink key={shelf.id} shelf={shelf} count={status.nav[shelf.id]} />
-              ))}
-              <AddLinkButton />
-            </nav>
-            <div className="mx-2.5 my-3 h-px bg-mesh" />
-            <nav aria-label="More" className="flex flex-col gap-0.5">
-              {SETTINGS.map((link) => (
-                <Link key={link.to} to={link.to} className={sideLinkClass}>
-                  {link.label}
+              <nav aria-label="Shelves" className="flex flex-col gap-0.5">
+                <Link to={DIGEST.to} className={sideLinkClass}>
+                  <DIGEST.icon aria-hidden className="size-4 text-silt" strokeWidth={1.8} />
+                  {DIGEST.label}
                 </Link>
-              ))}
-            </nav>
-            <ThemeToggle className="mt-auto self-start" />
-          </aside>
-          <main className="min-w-0 pt-11 pr-[max(56px,env(safe-area-inset-right))] pl-14 pb-16 max-[700px]:pr-[max(16px,env(safe-area-inset-right))] max-[700px]:pl-[max(16px,env(safe-area-inset-left))] max-[700px]:pt-[calc(20px+env(safe-area-inset-top))] max-[700px]:pb-[calc(var(--dock-h,72px)+28px)]">
-            <Outlet />
-          </main>
-        </div>
-      </Dock>
+                <Link to={TOPICS.to} activeOptions={{ exact: true }} className={sideLinkClass}>
+                  <TOPICS.icon aria-hidden className="size-4 text-silt" strokeWidth={1.8} />
+                  <span className="flex-1">{TOPICS.label}</span>
+                  <span className="font-mono text-[11.5px] text-silt">{status.nav.topics}</span>
+                </Link>
+                <SideTopics />
+                {SHELVES.map((shelf) => (
+                  <ShelfLink key={shelf.id} shelf={shelf} count={status.nav[shelf.id]} />
+                ))}
+                <AddLinkButton />
+              </nav>
+              <div className="mx-2.5 my-3 h-px bg-mesh" />
+              <nav aria-label="More" className="flex flex-col gap-0.5">
+                {SETTINGS.map((link) => (
+                  <Link key={link.to} to={link.to} className={sideLinkClass}>
+                    {link.label}
+                  </Link>
+                ))}
+              </nav>
+              <SettingsMenu className="mt-auto ml-0.5 self-start" />
+            </aside>
+            <main className="min-w-0 pt-11 pr-[max(56px,env(safe-area-inset-right))] pl-14 pb-16 max-[700px]:pr-[max(16px,env(safe-area-inset-right))] max-[700px]:pl-[max(16px,env(safe-area-inset-left))] max-[700px]:pt-[calc(20px+env(safe-area-inset-top))] max-[700px]:pb-[calc(var(--dock-h,72px)+28px)]">
+              <Outlet />
+            </main>
+          </div>
+        </Dock>
+        <DropAnywhere />
+        <PasteAnywhere />
+      </ImagesProvider>
       <Toaster />
     </ShelfDnd>
   );
@@ -93,16 +98,21 @@ function SideTopics(): JSX.Element {
 
 function useAnnounceSettled(): (item: ItemDetail) => void {
   const navigate = useNavigate();
-  const act = useItemAction();
+  const move = useMoveItem();
   return (item) => {
     const open = { label: "Open", onClick: () => navigate({ to: "/items/$itemId", params: { itemId: item.id } }) };
     switch (item.status) {
       case "kept":
-        toast(`Kept: ${item.display_title}, ${item.relevance_score}`, { action: open });
+        toast(
+          item.wishlist
+            ? `On your wishlist: ${item.display_title}`
+            : `Kept: ${item.display_title}, ${item.relevance_score}`,
+          { action: open },
+        );
         return;
       case "archived":
         toast(`Archived: ${item.display_title}`, {
-          action: { label: ACTIONS.keep.label, onClick: () => act.mutate({ id: item.id, action: "keep" }) },
+          action: { label: ACTIONS.keep.label, onClick: () => void move(item, "keep") },
         });
         return;
       case "failed":

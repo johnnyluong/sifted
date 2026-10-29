@@ -2,11 +2,16 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createQueryClient, type Goal, type GoalDraft, type SetupApply, type SetupPlan, type SetupView } from "@/api";
 import { route } from "@/test/fake-api";
 import { status } from "@/test/fixtures";
 import { createAppRouter } from "../router";
+
+const toast = vi.hoisted(() => Object.assign(vi.fn(), { error: vi.fn() }));
+vi.mock("sonner", () => ({ toast, Toaster: () => null }));
+
+afterEach(() => toast.mockClear());
 
 const SETUP: SetupView = {
   questions: [
@@ -43,6 +48,8 @@ const SETUP: SetupView = {
   ],
   answers: [],
   setup_at: null,
+  kept_anyway: [],
+  kept_since_setup: 0,
 };
 
 function goal(id: number, title: string): Goal {
@@ -66,18 +73,20 @@ const PLAN: SetupPlan = {
   values_text: "Craft over hype.",
 };
 
-function renderSetup(goals: Goal[] = [goal(1, "Cook more"), goal(2, "Run a marathon")]) {
+function renderSetup(goals: Goal[] = [goal(1, "Cook more"), goal(2, "Run a marathon")], view: SetupView = SETUP) {
   window.history.replaceState(null, "", "/setup");
   route("GET /api/status", () => status());
-  route("GET /api/setup", () => SETUP);
+  route("GET /api/setup", () => view);
   route("GET /api/goals", () => goals);
   route("GET /api/values", () => ({ values_text: "" }));
   const queryClient = createQueryClient();
+  const router = createAppRouter(queryClient);
   render(
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={createAppRouter(queryClient)} />
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+  return router;
 }
 
 async function answerAndDraft() {
@@ -135,6 +144,77 @@ describe("setup", () => {
       ],
     });
     expect((screen.getAllByLabelText("Goal")[0] as HTMLInputElement).value).toBe("Market my web app");
+  });
+
+  it("turns a typed area into its own chip, and Enter adds it instead of drafting", async () => {
+    let drafted: unknown;
+    let drafts = 0;
+    route("POST /api/setup/draft", async (request) => {
+      drafts += 1;
+      drafted = await request.json();
+      return PLAN;
+    });
+    renderSetup(undefined, {
+      ...SETUP,
+      answers: [{ question_id: "areas", text: "home server; Home Server", picked: [] }],
+    });
+    const user = userEvent.setup();
+    const areas = await screen.findByRole("group", { name: "Which areas do you save about?" });
+    const box = within(areas).getByRole("textbox", { name: "Something else" });
+    const chips = () =>
+      within(areas)
+        .getAllByRole("checkbox")
+        .filter((c) => (c as HTMLInputElement).checked)
+        .map((c) => c.closest("label")?.textContent);
+    expect(chips()).toEqual(["home server"]);
+
+    await user.type(box, "Woodworking{Enter}");
+    await user.type(box, "restaurants, bars and food spots{Enter}");
+    await user.type(box, "Home Server");
+    await user.click(within(areas).getByRole("button", { name: "Add" }));
+    expect(drafts).toBe(0);
+    expect(box).toHaveProperty("value", "");
+    expect(chips()).toEqual(["Restaurants, bars and food spots", "home server", "Woodworking"]);
+
+    await user.click(within(areas).getByRole("checkbox", { name: "home server" }));
+    await user.type(box, "3D printing");
+    await user.click(screen.getByRole("button", { name: "Draft my goals" }));
+    await screen.findByRole("heading", { name: "New goals" });
+    expect(drafted).toEqual({
+      answers: [{ question_id: "areas", text: "Woodworking; 3D printing", picked: ["food"] }],
+    });
+  });
+
+  it("drafts from an area still in the box when it is the only answer", async () => {
+    let drafted: unknown;
+    route("POST /api/setup/draft", async (request) => {
+      drafted = await request.json();
+      return PLAN;
+    });
+    renderSetup();
+    const user = userEvent.setup();
+    await user.type(await screen.findByRole("textbox", { name: "Something else" }), "home lab; ;");
+    await user.click(screen.getByRole("button", { name: "Draft my goals" }));
+    await screen.findByRole("heading", { name: "New goals" });
+    expect(drafted).toEqual({ answers: [{ question_id: "areas", text: "home lab", picked: [] }] });
+  });
+
+  it("adds each area typed with semicolons and keeps text that does not fit", async () => {
+    renderSetup();
+    const user = userEvent.setup();
+    const areas = await screen.findByRole("group", { name: "Which areas do you save about?" });
+    const box = within(areas).getByRole("textbox", { name: "Something else" });
+    await user.type(box, "Woodworking; 3D printing{Enter}");
+    expect(within(areas).getByRole("checkbox", { name: "Woodworking" })).toHaveProperty("checked", true);
+    expect(within(areas).getByRole("checkbox", { name: "3D printing" })).toHaveProperty("checked", true);
+
+    const long = "x".repeat(990);
+    await user.click(box);
+    await user.paste(long);
+    await user.keyboard("{Enter}");
+    expect(box).toHaveProperty("value", long);
+    expect(within(areas).getByRole("alert").textContent).toBe("No room for more. Remove one first.");
+    expect(screen.getByRole("button", { name: "Draft my goals" })).toHaveProperty("disabled", true);
   });
 
   it("presets the goals the draft retires and saves the edited plan with the answers", async () => {
@@ -228,6 +308,28 @@ describe("setup", () => {
     await user.click(screen.getByRole("button", { name: "Save goals" }));
     await waitFor(() => expect(applied).toBeDefined());
     expect(applied).toMatchObject({ add, deactivate: [2] });
+  });
+
+  it("offers a topic rebuild after a redo that saves, but not on the first run", async () => {
+    route("POST /api/setup/draft", () => PLAN);
+    route("POST /api/setup/apply", () => [goal(1, "Cook more")]);
+    const router = renderSetup();
+    const user = await answerAndDraft();
+    await user.click(screen.getByRole("button", { name: "Save goals" }));
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+    const [message, options] = toast.mock.calls[0] ?? [];
+    expect([message, options?.action?.label]).toEqual(["Goals saved", "Rebuild topics"]);
+    options.action.onClick();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/topics/rebuild"));
+  });
+
+  it("saves the first goals without offering a rebuild", async () => {
+    route("POST /api/setup/draft", () => PLAN);
+    route("POST /api/setup/apply", () => [goal(1, "Cook more")]);
+    renderSetup([]);
+    const user = await answerAndDraft();
+    await user.click(screen.getByRole("button", { name: "Save goals" }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Goals saved", undefined));
   });
 
   it("shows a refused save next to the button", async () => {

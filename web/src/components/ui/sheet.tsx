@@ -26,10 +26,11 @@ function useKeyboardInset(): number {
 
 export function SheetContent({
   title,
+  narrow,
   className,
   children,
   ...props
-}: ComponentProps<typeof Dialog.Content> & { title: string }): JSX.Element {
+}: ComponentProps<typeof Dialog.Content> & { title: string; narrow?: boolean }): JSX.Element {
   const inset = useKeyboardInset();
   return (
     <Dialog.Portal>
@@ -40,6 +41,7 @@ export function SheetContent({
         className={cn(
           "fixed inset-x-0 z-50 max-h-[85dvh] overflow-y-auto rounded-t-[18px] border-mesh border-t bg-sheet px-4 pb-[max(16px,env(safe-area-inset-bottom))] text-graphite shadow-float outline-none",
           "data-[state=closed]:animate-out data-[state=closed]:slide-out-to-bottom data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom data-[state=open]:duration-200",
+          narrow && "min-[700px]:mx-auto min-[700px]:max-w-[520px] min-[700px]:px-5",
           className,
         )}
         {...props}

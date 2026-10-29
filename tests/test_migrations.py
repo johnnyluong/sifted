@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
-from sqlmodel import col, select
+from sqlmodel import SQLModel, col, select
 
 from alembic import command
 from sift import db, digest, runtime
 from sift.config import Settings
-from sift.domain import Channel, DigestRole, ItemStatus, ItemType, Source
-from sift.models import DigestEntry, Item
+from sift.domain import Channel, DigestRole, ItemStatus, ItemType, LinkState, Source
+from sift.items import queries
+from sift.llm.schemas import ProductCard
+from sift.models import DigestEntry, Import, ImportLink, Item
 from tests.conftest import Clock
 
 BEFORE_QUEUE = "3fc56085a339"
@@ -61,6 +63,12 @@ def _item(i: int, clock: Clock, item_type: ItemType) -> Item:
     )
 
 
+def _old_items(row: dict[str, object]) -> sa.Insert:
+    """An insert of only these columns, so model defaults for columns a migration adds later stay out."""
+    items = SQLModel.metadata.tables["items"]
+    return sa.insert(sa.table("items", *(sa.column(k, items.c[k].type) for k in row)))
+
+
 def _queue() -> list[tuple[int, int, DigestRole, str | None, str | None, str | None]]:
     with db.read_session() as s:
         rows = s.exec(select(DigestEntry).order_by(col(DigestEntry.position))).all()
@@ -72,11 +80,11 @@ def test_old_digests_become_queues_and_round_trip(settings: Settings, clock: Clo
     db.configure(settings.db_url)
     cfg = runtime.alembic_config(settings)
     command.upgrade(cfg, BEFORE_QUEUE)
-    with db.write_session() as s:
-        for i, kind in ((1, ItemType.idea), (2, ItemType.idea), (3, ItemType.place), (4, ItemType.place)):
-            s.add(_item(i, clock, kind))
     raw = sa.create_engine(settings.db_url)
     with raw.begin() as c:
+        kinds = ((1, ItemType.idea), (2, ItemType.idea), (3, ItemType.place), (4, ItemType.place))
+        rows = [_item(i, clock, kind).model_dump(exclude_none=True, exclude={"wishlist"}) for i, kind in kinds]
+        c.execute(_old_items(rows[0]), rows)
         c.execute(
             sa.text("INSERT INTO digests VALUES (1, :t, :t, :t, :md, 'claude-sonnet-5-5', NULL)"),
             {"t": clock().strftime("%Y-%m-%d %H:%M:%S.%f"), "md": LEGACY},
@@ -97,10 +105,130 @@ def test_old_digests_become_queues_and_round_trip(settings: Settings, clock: Clo
     assert [p.item.id for p in view.top] == [3, 1, 2] and view.top[2].refill
     assert [(g.heading, [x.line for x in g.lines]) for g in view.groups] == [("Elsewhere", ["Line for four."])]
 
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, BEFORE_QUEUE)
     with raw.connect() as c:
         md = c.execute(sa.text("SELECT content_md FROM digests WHERE id = 1")).scalar_one()
     assert md.startswith("A week to ship.") and "**[Item 3](/items/3)**" in md and "(/items/4): Line for four." in md
     command.upgrade(cfg, "head")
     assert _queue() == queue
     raw.dispose()
+
+
+BEFORE_WISHLIST = "228878c93883"
+
+
+def test_wishlist_migration_backfills_product_cards_and_round_trips(settings: Settings, clock: Clock) -> None:
+    settings.data_dir.mkdir(parents=True)
+    db.configure(settings.db_url)
+    cfg = runtime.alembic_config(settings)
+    command.upgrade(cfg, BEFORE_WISHLIST)
+    raw = sa.create_engine(settings.db_url)
+    product = _item(1, clock, ItemType.product).model_dump(exclude_none=True, exclude={"wishlist"})
+    product["details"] = {"name": "Jacket", "what_it_is": "A rain jacket", "price": "$90", "link": None}
+    with raw.begin() as c:
+        c.execute(_old_items(product), [product])
+
+    def columns() -> set[str]:
+        with raw.connect() as c:
+            return {r[1] for r in c.execute(sa.text("PRAGMA table_info(items)"))}
+
+    command.upgrade(cfg, "head")
+    detail = queries.get_item(1, llm_ready=True)
+    assert detail is not None and isinstance(detail.card, ProductCard)
+    assert detail.card.details.wishlist is False and detail.wishlist is False
+
+    command.downgrade(cfg, BEFORE_WISHLIST)
+    assert not {"wishlist", "wishlist_override"} & columns()
+    with raw.connect() as c:
+        details = c.execute(sa.text("SELECT details FROM items WHERE id = 1")).scalar_one()
+    assert "wishlist" not in details
+
+    command.upgrade(cfg, "head")
+    assert {"wishlist", "wishlist_override"} <= columns()
+    raw.dispose()
+
+
+BEFORE_SETTLED = "931548f27344"
+
+
+def test_settled_marker_migration_keeps_processed_at_only_on_settled_posts(settings: Settings, clock: Clock) -> None:
+    settings.data_dir.mkdir(parents=True)
+    db.configure(settings.db_url)
+    cfg = runtime.alembic_config(settings)
+    command.upgrade(cfg, BEFORE_SETTLED)
+    stale, settled_at = clock(), clock.advance(hours=1)
+    scored = {"scored_at": stale, "relevance_score": 70, "threshold_decision": "keep"}
+    cases: dict[int, dict[str, object]] = {
+        1: {"status": ItemStatus.queued, "processed_at": stale},
+        2: {"status": ItemStatus.failed, "processed_at": stale, "failure_kind": "llm_failed"},
+        3: {"status": ItemStatus.archived, "processed_at": stale},
+        4: {"status": ItemStatus.kept, "processed_at": stale, **scored},
+        5: {"status": ItemStatus.kept, "decided_at": settled_at, **scored},
+        6: {"status": ItemStatus.kept, "wishlist": True, "decided_at": settled_at},
+    }
+    raw = sa.create_engine(settings.db_url)
+    with raw.begin() as c:
+        for i, fields in cases.items():
+            row = {**_item(i, clock, ItemType.idea).model_dump(exclude_none=True), **fields}
+            c.execute(_old_items(row), [row])
+
+    command.upgrade(cfg, "head")
+    with db.read_session() as s:
+        marks = {r.id: r.processed_at for r in s.exec(select(Item)).all()}
+    assert marks == {1: None, 2: None, 3: None, 4: stale, 5: settled_at, 6: settled_at}
+    command.downgrade(cfg, BEFORE_SETTLED)
+    command.upgrade(cfg, "head")
+    raw.dispose()
+
+
+BEFORE_DETACH = "7e2b0c4d9a13"
+
+
+def test_a_released_link_can_lose_its_post_and_round_trips(settings: Settings, clock: Clock) -> None:
+    settings.data_dir.mkdir(parents=True)
+    db.configure(settings.db_url)
+    cfg = runtime.alembic_config(settings)
+    command.upgrade(cfg, BEFORE_DETACH)
+    with db.write_session() as s:
+        s.add(_item(1, clock, ItemType.idea))
+        imp = Import(
+            filename="export.zip",
+            created_at=clock(),
+            updated_at=clock(),
+            files_read=[],
+            files_skipped_large=[],
+            files_skipped_budget=[],
+            unsupported=[],
+        )
+        s.add(imp)
+        s.flush()
+        assert imp.id is not None
+        for code, item_id in (("M1", 1), ("M2", None)):
+            state = LinkState.released if item_id else LinkState.found
+            url = f"https://www.instagram.com/reel/{code}/"
+            s.add(
+                ImportLink(
+                    import_id=imp.id,
+                    source=Source.instagram,
+                    canonical_id=code,
+                    clean_url=url,
+                    url=url,
+                    state=state,
+                    item_id=item_id,
+                    released_at=clock() if item_id else None,
+                )
+            )
+
+    def links() -> list[tuple[str, LinkState, int | None, object]]:
+        with db.read_session() as s:
+            rows = s.exec(select(ImportLink).order_by(col(ImportLink.canonical_id))).all()
+            return [(r.canonical_id, r.state, r.item_id, r.released_at) for r in rows]
+
+    command.upgrade(cfg, "head")
+    with db.write_session() as s:
+        s.exec(sa.update(ImportLink).values(item_id=None))
+    assert links() == [("M1", LinkState.released, None, clock()), ("M2", LinkState.found, None, None)]
+
+    command.downgrade(cfg, "-1")
+    assert links() == [("M1", LinkState.skipped, None, clock()), ("M2", LinkState.found, None, None)]
+    command.upgrade(cfg, "head")
